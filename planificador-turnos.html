@@ -68,6 +68,8 @@ select,input[type=text]{background:var(--surface);border:1px solid var(--line);b
 .store{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;text-align:left;cursor:pointer;display:flex;flex-direction:column;gap:10px;min-width:0}
 .store:hover{border-color:var(--accent)}
 .store .row1{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
+.store .row1 .pill{flex:none;font-size:.72rem;padding:2px 8px}
+.weekstatus{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-block:2px 4px}
 .store .name{font-weight:600;line-height:1.25}
 .chain{font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;color:var(--peya);font-weight:600}
 .store .meta{display:flex;gap:14px;font-size:.84rem;color:var(--muted)}
@@ -276,7 +278,7 @@ function applyRules(people){
 /* ---------- utilidades UI ---------- */
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function chip(v){ const k=kind(v); return `<span class="chip k-${k}">${esc(v||'—')}</span>`; }
-function pill(status,dirty){ const base= status==='planificado'?'<span class="pill ok">Planificado</span>': status==='excel'?'<span class="pill ok">Ejecutado</span>':'<span class="pill rev">Por revisar</span>';
+function pill(status,dirty){ const base= status==='planificado'?'<span class="pill ok">Planificado</span>': status==='excel'?'<span class="pill ok">Planificado</span>':'<span class="pill rev">Por revisar</span>';
   return base+(dirty?' <span class="pill draft">Cambios sin aplicar</span>':''); }
 function chainOf(s){ return s.split(' ')[0]; }
 function cityOf(s){ const m=/\(([^)]+)\)/.exec(s); return m?m[1]:'Lima'; }
@@ -297,18 +299,21 @@ function viewSummary(){
   const w=ui.sumWeek, people=weekPeople(w).filter(p=>!retired(p));
   const hrs=people.reduce((a,p)=>a+hoursOf(p),0), sen=people.filter(p=>/senior/i.test(p.rol)).length;
   const cov=coverage(people); const tot=cov.map(c=>c.am+c.pm+c.pt); const maxDay=Math.max(...tot), peakDay=DAYS[tot.indexOf(maxDay)].toLowerCase();
-  const label= w===40?'Semana previa':(w===41&&!STORES.some(s=>plans[key(41,s)])?'Borrador del Excel':'Semana planificada');
+  const label= w===40?'Semana previa':'Semana';
+  const isDone=s=>['planificado','excel'].includes(effective(w,s).status);
+  const doneN=STORES.filter(isDone).length, weekDone=doneN===STORES.length;
+  const weekPill= weekDone?'<span class="pill ok">Planificado</span>':`<span class="pill rev">Por revisar</span> <span class="muted" style="font-size:.86rem">${doneN} de ${STORES.length} tiendas planificadas · faltan ${STORES.length-doneN}</span>`;
   const cards=STORES.map(s=>{ const ps=effective(w,s).people.filter(p=>!retired(p)); if(!ps.length) return '';
     const c=coverage(ps), mx=Math.max(1,...c.map(x=>x.am+x.pm+x.pt));
     const bars=c.map(x=>`<div class="bar" title="AM ${x.am} · PM ${x.pm} · Part ${x.pt}">${x.am?`<span class="s-am" style="height:${x.am/mx*100}%"></span>`:''}${x.pm?`<span class="s-pm" style="height:${x.pm/mx*100}%"></span>`:''}${x.pt?`<span class="s-pt" style="height:${x.pt/mx*100}%"></span>`:''}</div>`).join('');
     return `<button class="store" data-act="detail" data-store="${esc(s)}">
-      <div class="row1"><div><div class="chain">${esc(chainOf(s))} · ${esc(cityOf(s))}</div><div class="name">${esc(s)}</div></div></div>
+      <div class="row1"><div><div class="chain">${esc(chainOf(s))} · ${esc(cityOf(s))}</div><div class="name">${esc(s)}</div></div>${pill(effective(w,s).status,!!drafts[key(w,s)])}</div>
       <div class="meta"><span><b>${ps.length}</b> personas</span><span><b>${ps.reduce((a,p)=>a+hoursOf(p),0)}</b> h</span><span><b>${ps.filter(p=>/senior/i.test(p.rol)).length}</b> senior</span></div>
       <div class="bars" aria-hidden="true">${bars}</div><div class="barlabels" aria-hidden="true">${DS.map(d=>`<span>${d[0]}</span>`).join('')}</div>
     </button>`; }).join('');
   return `
   <header class="topbar">
-    <div class="titles"><span class="eyebrow">${label} · S${w} · ${range(w)}</span><h1>Horarios por tienda</h1>
+    <div class="titles"><span class="eyebrow">${label} · S${w} · ${range(w)}</span><h1>Horarios por tienda</h1><div class="weekstatus">${weekPill}</div>
       <span class="muted">Base tomada de “Planificación de horarios PeYA”. Toca una tienda para ver el detalle por persona.</span></div>
     <div class="actions">
       <div class="field"><label for="sumWeek">Ver semana</label><select id="sumWeek">${summaryWeeks().map(x=>`<option value="${x}" ${x===w?'selected':''}>S${x} · ${range(x)}</option>`).join('')}</select></div>
@@ -332,7 +337,7 @@ function detailOverlay(w,s){
   const e=effective(w,s), ps=e.people, cov=coverage(ps.filter(p=>!retired(p)));
   return `<div class="overlay" data-act="closeDetail"><div class="panel" role="dialog" aria-modal="true" aria-label="${esc(s)}" data-stop="1">
     <div class="panel-head"><div><span class="eyebrow">S${w} · ${range(w)}</span><h2>${esc(s)}</h2></div>
-      <button class="btn" data-act="closeDetail" id="closeDetailBtn">Cerrar</button></div>
+      <div class="actions">${pill(e.status,!!drafts[key(w,s)])}${w>=41?`<button class="btn primary" data-act="adjust" data-week="${w}" data-store="${esc(s)}">Revisar y ajustar</button>`:''}<button class="btn" data-act="closeDetail" id="closeDetailBtn">Cerrar</button></div></div>
     <div class="scroll"><table><thead><tr><th>Zubalero</th><th>Restricción</th>${DS.map(d=>`<th>${d}</th>`).join('')}<th>Horas</th></tr></thead>
     <tbody>${ps.map(p=>`<tr><td class="person"><div class="pn">${esc(p.name)}</div><div class="pm">${esc(p.rol)} · ${esc(p.mod)}</div></td>
       <td>${p.tipo?`<span class="tag">${esc(p.tipo)}</span>`:'<span class="muted">—</span>'}${p.descanso?`<div class="pm muted" style="font-size:.76rem;margin-top:3px">Descansa ${esc(p.descanso.toLowerCase())}</div>`:''}</td>
@@ -438,6 +443,7 @@ document.addEventListener('click',ev=>{
   else if(a==='closeDetail'){ ui.detail=null; render(); }
   else if(a==='goPlan'){ ui.view='plan'; ui.detail=null; render(); window.scrollTo(0,0); }
   else if(a==='goSummary'){ ui.view='summary'; render(); window.scrollTo(0,0); }
+  else if(a==='adjust'){ ui.planWeek=+t.dataset.week; ui.store=t.dataset.store; ui.detail=null; ui.view='editor'; ui.changed=new Set(); ui.notes=null; ui.confirmDel=null; render(); window.scrollTo(0,0); }
   else if(a==='openStore'){ ev.stopPropagation(); ui.store=t.dataset.store; ui.view='editor'; ui.changed=new Set(); ui.notes=null; ui.confirmDel=null; render(); window.scrollTo(0,0); }
   else if(a==='backPlan'){ ui.view='plan'; ui.store=null; ui.notes=null; render(); window.scrollTo(0,0); }
   else if(a==='export'){ exportWeek(+t.dataset.week); }
@@ -489,7 +495,7 @@ async function exportWeek(w){
   if(!downloads){ toast('La descarga de archivos no está disponible en esta vista. Abre el artifact en claude.ai.'); return; }
   const head=['SEMANA','TIPO / RESTRICCION','TIENDA','ZUBALERO','ROL','MODALIDAD','Dia descanso',...DAYS,'HORAS','ESTADO'];
   const rows=[head];
-  STORES.forEach(s=>{ const e=effective(w,s); const st=e.status==='planificado'?'Planificado':e.status==='excel'?'Ejecutado':'Por revisar';
+  STORES.forEach(s=>{ const e=effective(w,s); const st=(e.status==='planificado'||e.status==='excel')?'Planificado':'Por revisar';
     e.people.forEach(p=>rows.push([w,p.tipo||'',s,p.name,p.rol,p.mod,p.descanso||'',...p.days,hoursOf(p),st])); });
   const ws=XLSX.utils.aoa_to_sheet(rows);
   ws['!cols']=[6,18,30,36,13,11,13,10,10,10,10,10,10,10,7,12].map(wch=>({wch}));
