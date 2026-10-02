@@ -47,6 +47,10 @@ button,select,input{font:inherit;color:inherit}
 .btn.ghost{background:transparent;border-color:transparent;color:var(--muted);padding-inline:8px}
 .btn.ghost:hover{color:var(--ink)}
 .btn.danger{color:var(--ret-fg)}
+.btn.dangerfill{background:var(--ret-fg);border-color:var(--ret-fg);color:#FFFFFF}
+.confirmbar{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:space-between;padding:12px 16px;border-radius:var(--r);border:1px solid var(--rev-line);background:var(--rev-bg);color:var(--ink)}
+.confirmbar.clear{border-color:var(--ret-fg);background:var(--ret-bg)}
+.confirmbar span{flex:1;min-width:240px;max-width:75ch}
 .btn.sm{padding:5px 10px;font-size:.85rem}
 .btn[disabled]{opacity:.5;cursor:not-allowed}
 .field{display:flex;flex-direction:column;gap:4px}
@@ -203,15 +207,18 @@ function coverage(people){ return DAYS.map((_,i)=>{ const c={am:0,pm:0,pt:0}; pe
 let plans={}; let storage='cargando'; let db=null, downloads=null;
 const drafts={}; // key -> {people}
 const key=(w,s)=>`w${w}--${slug(s)}`;
-const ui={view:'summary', sumWeek:40, planWeek:41, store:null, detail:null, changed:new Set(), notes:null, confirmDel:null};
+const ui={view:'summary', sumWeek:40, planWeek:41, store:null, detail:null, changed:new Set(), notes:null, confirmDel:null, confirmWeek:null};
 
 function effective(w,s){
   const p=plans[key(w,s)]; if(p) return {status:p.status, people:p.people, source:'guardado', updatedAt:p.updatedAt};
   if(w===40) return {status:'excel', people:SHEET[40][s]||[], source:'excel'};
   if(w===41) return {status:'revisar', people:SHEET[41][s]||[], source:'excel'};
-  if(w>41){ const prev=effective(w-1,s); return {status:'revisar', people:prev.people.filter(p=>!retired(p)).map(p=>({...clone(p),manual:[]})), source:'sugerido'}; }
+  if(w>41) return {status:'revisar', people:carry(prevSource(w,s).e.people), source:'sugerido'};
   return {status:'revisar', people:[], source:'vacío'};
 }
+const carry=ps=>ps.filter(p=>!retired(p)).map(p=>({...clone(p),manual:[]}));
+// semana anterior más cercana que no fue eliminada
+function prevSource(w,s){ for(let m=w-1;m>=40;m--){ if(!plans[key(m,s)]?.cleared) return {e:effective(m,s),m}; } return {e:{people:[]},m:w-1}; }
 function weekPeople(w){ return STORES.flatMap(s=>effective(w,s).people); }
 
 /* ---------- persistencia ---------- */
@@ -234,7 +241,10 @@ async function boot(){
   render();
 }
 async function persist(w,s,people){
-  const body={week:w, store:s, status:'planificado', people:clone(people), updatedAt:new Date().toISOString()};
+  return persistBody({week:w, store:s, status:'planificado', people:clone(people), updatedAt:new Date().toISOString()});
+}
+async function persistBody(body){
+  const w=body.week, s=body.store;
   plans[key(w,s)]=body;
   if(db){ try{ await db.doc('plans/'+key(w,s)).set(body); return true; }
     catch(e){ toast(e?.code==='quota_exceeded'?'La base está llena. Elimina semanas antiguas para seguir guardando.':'No se pudo guardar en la base compartida. Quedó guardado en este navegador.'); saveLocal(); return false; } }
@@ -293,7 +303,7 @@ function render(){ const app=document.getElementById('app');
   else app.innerHTML=viewEditor();
 }
 
-function summaryWeeks(){ const ws=new Set([40,41]); Object.values(plans).forEach(p=>ws.add(p.week)); return [...ws].sort((a,b)=>a-b); }
+function summaryWeeks(){ return [40,...PLAN_WEEKS]; }
 
 function viewSummary(){
   const w=ui.sumWeek, people=weekPeople(w).filter(p=>!retired(p));
@@ -318,6 +328,8 @@ function viewSummary(){
     <div class="actions">
       <div class="field"><label for="sumWeek">Ver semana</label><select id="sumWeek">${summaryWeeks().map(x=>`<option value="${x}" ${x===w?'selected':''}>S${x} · ${range(x)}</option>`).join('')}</select></div>
       <button class="btn" data-act="export" data-week="${w}">Exportar Excel S${w}</button>
+      <button class="btn" data-act="askWeek" data-type="reset" ${w===40?'disabled title="La S40 es la base del Excel"':''}>Resetear semana</button>
+      <button class="btn danger" data-act="askWeek" data-type="clear" ${w===40?'disabled title="La S40 es la base del Excel"':''}>Eliminar semana</button>
       <button class="btn primary" data-act="goPlan">Planificar nueva semana</button>
     </div>
   </header>
@@ -329,7 +341,8 @@ function viewSummary(){
     <div class="stat"><b>${maxDay}</b><span>personas el día pico (${peakDay})</span></div>
   </section>
   <div class="legend"><span><i class="k-am"></i>Turno AM</span><span><i class="k-pm"></i>Turno PM</span><span><i class="k-pt"></i>Part time (&lt; 6 h)</span><span><i class="k-off"></i>Descanso</span><span><i class="k-ret"></i>Retiro / vacaciones</span><span>Barras: personas por día (AM abajo, PM arriba)</span></div>
-  <section class="grid">${cards}</section>
+  ${weekConfirm(w)}
+  ${cards.trim()?`<section class="grid">${cards}</section>`:`<section class="panel"><h3>La S${w} no tiene horarios</h3><p class="muted" style="margin:0">Usa “Resetear semana” para copiar los horarios de la semana anterior, o entra a “Planificar nueva semana” y agrega personas tienda por tienda.</p></section>`}
   ${ui.detail?detailOverlay(w,ui.detail):''}`;
 }
 
@@ -446,6 +459,9 @@ document.addEventListener('click',ev=>{
   else if(a==='adjust'){ ui.planWeek=+t.dataset.week; ui.store=t.dataset.store; ui.detail=null; ui.view='editor'; ui.changed=new Set(); ui.notes=null; ui.confirmDel=null; render(); window.scrollTo(0,0); }
   else if(a==='openStore'){ ev.stopPropagation(); ui.store=t.dataset.store; ui.view='editor'; ui.changed=new Set(); ui.notes=null; ui.confirmDel=null; render(); window.scrollTo(0,0); }
   else if(a==='backPlan'){ ui.view='plan'; ui.store=null; ui.notes=null; render(); window.scrollTo(0,0); }
+  else if(a==='askWeek'){ ui.confirmWeek={type:t.dataset.type,w:ui.sumWeek}; render(); document.getElementById('weekYes')?.focus(); }
+  else if(a==='weekNo'){ ui.confirmWeek=null; render(); }
+  else if(a==='weekYes'){ const c=ui.confirmWeek; ui.confirmWeek=null; if(c) (c.type==='reset'?resetWeek:clearWeek)(c.w); }
   else if(a==='export'){ exportWeek(+t.dataset.week); }
   else if(a==='del'){ ui.confirmDel=t.dataset.pid; render(); }
   else if(a==='delNo'){ ui.confirmDel=null; render(); }
@@ -488,6 +504,23 @@ async function doUpdate(){
   render();
   toast(`${ui.store}: horario de la S${ui.planWeek} actualizado y marcado como Planificado${res.changed.size?` · ${res.changed.size} celdas ajustadas`:''}.`);
 }
+
+/* ---------- resetear / eliminar semana ---------- */
+function weekConfirm(w){ const c=ui.confirmWeek; if(!c||c.w!==w) return '';
+  const src=Math.max(40,...STORES.map(s=>prevSource(w,s).m));
+  const msg=c.type==='reset'?`¿Resetear la S${w}? Las ${STORES.length} tiendas se reemplazan con una copia de los horarios de la S${src} y quedan en “Por revisar”. Se pierden los cambios guardados de esta semana.`
+    :`¿Eliminar la S${w}? Se borran los horarios de las ${STORES.length} tiendas y la semana queda vacía. Puedes recuperarla después con “Resetear semana”.`;
+  return `<div class="confirmbar ${c.type}" role="alertdialog" aria-label="Confirmar"><span>${msg}</span><div class="actions"><button class="btn ${c.type==='clear'?'dangerfill':'primary'}" id="weekYes" data-act="weekYes">${c.type==='reset'?'Sí, resetear':'Sí, eliminar'}</button><button class="btn" data-act="weekNo">Cancelar</button></div></div>`; }
+async function writeWeek(w,makeBody){ const now=new Date().toISOString();
+  const bodies=STORES.map(s=>({week:w, store:s, updatedAt:now, ...makeBody(s)}));
+  STORES.forEach(s=>delete drafts[key(w,s)]);
+  bodies.forEach(b=>plans[key(w,b.store)]=b); render();
+  const res=await Promise.all(bodies.map(b=>persistBody(b))); render(); return res.every(Boolean); }
+async function resetWeek(w){ const src={}; STORES.forEach(s=>src[s]=prevSource(w,s));
+  const ok=await writeWeek(w,s=>({status:'revisar', people:carry(src[s].e.people), reset:true}));
+  if(ok) toast(`S${w} reseteada: copia de la semana anterior, ${STORES.length} tiendas en “Por revisar”.`); }
+async function clearWeek(w){ const ok=await writeWeek(w,()=>({status:'revisar', people:[], cleared:true}));
+  if(ok) toast(`S${w} eliminada. La semana quedó sin horarios.`); }
 
 /* ---------- exportar ---------- */
 async function exportWeek(w){
