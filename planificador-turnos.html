@@ -1,0 +1,509 @@
+<title>Planificador de Turnos PeYA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+/* Layout: one working column (max 1180px); views swap in place — resumen → tablero de semana → editor de tienda. */
+:root{
+  --bg:#F3F5F6; --surface:#FFFFFF; --sunk:#E9EDEF; --ink:#14202A; --muted:#5A6A76; --line:#D9E0E4;
+  --accent:#0B6970; --accent-ink:#FFFFFF; --focus:#0B6970;
+  --am-bg:#DCEAFE; --am-fg:#1B4A8A; --pm-bg:#E5E0FB; --pm-fg:#46369A; --pt-bg:#FBE2EC; --pt-fg:#8E2B55;
+  --off-bg:#EEF1F2; --off-fg:#6E7C86; --ret-bg:#F7E3E1; --ret-fg:#9B3127;
+  --rev-bg:#FFF1BF; --rev-fg:#6E5200; --rev-line:#EBC94E; --ok-bg:#D9F3E1; --ok-fg:#146237; --ok-line:#7FCF9B;
+  --warn:#9B5B00;
+  --f-display:"Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body:"IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono:"IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  --r:10px;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#0E1418; --surface:#162027; --sunk:#1C2830; --ink:#E4ECF1; --muted:#93A4B0; --line:#2A3842;
+  --accent:#4CC3C3; --accent-ink:#06282A; --focus:#4CC3C3;
+  --am-bg:#1B3250; --am-fg:#A9CBFF; --pm-bg:#2B2550; --pm-fg:#C7BBFF; --pt-bg:#45202F; --pt-fg:#F4AACA;
+  --off-bg:#1E2A31; --off-fg:#8797A2; --ret-bg:#45201C; --ret-fg:#F3A79D;
+  --rev-bg:#3B3010; --rev-fg:#F3D270; --rev-line:#8A7220; --ok-bg:#12361F; --ok-fg:#83E0A6; --ok-line:#2C7A4A;
+  --warn:#F0B35A; color-scheme:dark } }
+:root[data-theme="dark"]{
+  --bg:#0E1418; --surface:#162027; --sunk:#1C2830; --ink:#E4ECF1; --muted:#93A4B0; --line:#2A3842;
+  --accent:#4CC3C3; --accent-ink:#06282A; --focus:#4CC3C3;
+  --am-bg:#1B3250; --am-fg:#A9CBFF; --pm-bg:#2B2550; --pm-fg:#C7BBFF; --pt-bg:#45202F; --pt-fg:#F4AACA;
+  --off-bg:#1E2A31; --off-fg:#8797A2; --ret-bg:#45201C; --ret-fg:#F3A79D;
+  --rev-bg:#3B3010; --rev-fg:#F3D270; --rev-line:#8A7220; --ok-bg:#12361F; --ok-fg:#83E0A6; --ok-line:#2C7A4A;
+  --warn:#F0B35A; color-scheme:dark }
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:15px/1.5 var(--f-body);padding-inline:16px;padding-block:20px 64px}
+.wrap{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+h1,h2,h3{font-family:var(--f-display);margin:0;text-wrap:balance;letter-spacing:-.01em}
+h1{font-size:1.9rem;font-weight:700;line-height:1.1}
+h2{font-size:1.35rem;font-weight:700}
+h3{font-size:1.02rem;font-weight:600;font-family:var(--f-body);letter-spacing:0}
+.eyebrow{font-size:.74rem;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.muted{color:var(--muted)}
+.mono,.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+button,select,input{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+
+.topbar{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px 20px}
+.topbar .titles{display:flex;flex-direction:column;gap:4px;min-width:0}
+.actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:8px 14px;cursor:pointer;font-weight:500;line-height:1.2;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.btn.primary:hover{filter:brightness(1.07)}
+.btn.ghost{background:transparent;border-color:transparent;color:var(--muted);padding-inline:8px}
+.btn.ghost:hover{color:var(--ink)}
+.btn.danger{color:var(--ret-fg)}
+.btn.sm{padding:5px 10px;font-size:.85rem}
+.btn[disabled]{opacity:.5;cursor:not-allowed}
+.field{display:flex;flex-direction:column;gap:4px}
+.field label{font-size:.74rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600}
+select,input[type=text]{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:7px 10px;min-width:0}
+
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.stat{background:var(--surface);padding:14px 16px;display:flex;flex-direction:column;gap:2px}
+.stat b{font-family:var(--f-display);font-size:1.6rem;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat span{font-size:.82rem;color:var(--muted)}
+
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:.82rem;color:var(--muted);align-items:center}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-1px;margin-right:5px}
+.k-am{background:var(--am-bg);color:var(--am-fg)} .k-pm{background:var(--pm-bg);color:var(--pm-fg)}
+.k-pt{background:var(--pt-bg);color:var(--pt-fg)} .k-off{background:var(--off-bg);color:var(--off-fg)}
+.k-ret{background:var(--ret-bg);color:var(--ret-fg)}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+.store{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;text-align:left;cursor:pointer;display:flex;flex-direction:column;gap:10px;min-width:0}
+.store:hover{border-color:var(--accent)}
+.store .row1{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
+.store .name{font-weight:600;line-height:1.25}
+.chain{font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.store .meta{display:flex;gap:14px;font-size:.84rem;color:var(--muted)}
+.store .meta b{color:var(--ink);font-family:var(--f-mono);font-weight:500}
+.bars{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;align-items:end;height:58px}
+.bar{display:flex;flex-direction:column-reverse;gap:1px;height:100%;justify-content:flex-start}
+.bar span{display:block;border-radius:2px}
+.bar .s-am{background:var(--am-fg);opacity:.55} .bar .s-pm{background:var(--pm-fg);opacity:.75} .bar .s-pt{background:var(--pt-fg);opacity:.6}
+.barlabels{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;font-size:.68rem;color:var(--muted);text-align:center;margin-top:-6px}
+
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:18px;display:flex;flex-direction:column;gap:14px;min-width:0}
+.panel-head{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;align-items:flex-start}
+.scroll{overflow-x:auto;border:1px solid var(--line);border-radius:8px}
+table{border-collapse:collapse;width:100%}
+th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+th{font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600;background:var(--sunk);white-space:nowrap}
+tbody tr:last-child td{border-bottom:none}
+tfoot td{background:var(--sunk);font-size:.8rem;color:var(--muted);border-bottom:none;border-top:1px solid var(--line)}
+td.person{min-width:210px}
+td.person .pn{font-weight:500;line-height:1.25}
+td.person .pm{font-size:.78rem;color:var(--muted)}
+.chip{display:inline-block;font-family:var(--f-mono);font-size:.8rem;padding:3px 7px;border-radius:5px;white-space:nowrap;line-height:1.3}
+.chip.k-off{font-family:var(--f-body);font-size:.72rem;letter-spacing:.05em;font-weight:600}
+.chip.k-ret{font-family:var(--f-body);font-size:.72rem;letter-spacing:.05em;font-weight:600}
+.tag{display:inline-block;font-size:.72rem;padding:1px 7px;border-radius:999px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:.8rem;font-weight:600;padding:3px 10px;border-radius:999px;border:1px solid;white-space:nowrap}
+.pill::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.pill.rev{background:var(--rev-bg);color:var(--rev-fg);border-color:var(--rev-line)}
+.pill.ok{background:var(--ok-bg);color:var(--ok-fg);border-color:var(--ok-line)}
+.pill.draft{background:transparent;color:var(--warn);border-color:var(--warn);border-style:dashed}
+.pill.draft::before{display:none}
+
+.progress{display:flex;flex-direction:column;gap:6px;min-width:220px;flex:1}
+.track{height:8px;border-radius:99px;background:var(--rev-bg);overflow:hidden;border:1px solid var(--rev-line)}
+.track span{display:block;height:100%;background:var(--ok-fg);opacity:.8}
+
+.weekpick{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}
+.weekpick select{font-size:1.05rem;font-weight:600;padding:8px 12px}
+
+/* editor */
+.ed td{padding:5px 6px}
+.ed select.cell,.ed input.cell{width:100%;min-width:108px;font-family:var(--f-mono);font-size:.82rem;padding:5px 6px;border-radius:6px;border:1px solid transparent}
+.ed .cell.k-am,.ed .cell.k-pm,.ed .cell.k-pt,.ed .cell.k-off,.ed .cell.k-ret{border-color:transparent}
+.ed .cellwrap{position:relative}
+.ed .cellwrap.manual::after{content:"";position:absolute;top:3px;right:3px;width:6px;height:6px;border-radius:50%;background:var(--accent)}
+.ed .cellwrap.changed .cell{outline:2px solid var(--accent);outline-offset:-2px}
+.ed input.nm{width:100%;min-width:240px;font-weight:500;padding:5px 8px}
+.ed .sub{display:flex;gap:4px;margin-top:4px}
+.ed .sub select{font-size:.76rem;padding:3px 4px}
+.ed input.tipo{width:150px;font-size:.84rem;padding:5px 8px}
+.ed select.desc{font-size:.84rem;padding:5px 6px;width:118px}
+.hrs{font-family:var(--f-mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.hrs.over{color:var(--ret-fg);font-weight:600}
+.cov{font-family:var(--f-mono);font-size:.76rem;white-space:nowrap;line-height:1.35}
+.cov .zero{color:var(--ret-fg);font-weight:600}
+.addrow{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;padding:12px;background:var(--sunk);border-radius:8px}
+.addrow .field input,.addrow .field select{min-width:120px}
+.addrow .field.grow{flex:1;min-width:200px}
+.addrow .field.grow input{width:100%}
+.notes{display:flex;flex-direction:column;gap:6px;font-size:.88rem}
+.notes ul{margin:0;padding-left:18px}
+.rules{font-size:.86rem;color:var(--muted);max-width:75ch}
+.rules summary{cursor:pointer;color:var(--ink);font-weight:500}
+.rules ul{margin:.4em 0 0;padding-left:18px}
+.confirm{display:inline-flex;gap:4px;align-items:center;font-size:.82rem}
+
+.banner{font-size:.85rem;padding:8px 12px;border-radius:8px;background:var(--sunk);color:var(--muted)}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:8px;font-size:.9rem;max-width:calc(100% - 32px);box-shadow:0 6px 24px rgba(0,0,0,.2);z-index:50}
+
+.overlay{position:fixed;inset:0;background:rgba(10,18,24,.45);display:flex;justify-content:center;align-items:flex-start;padding:calc(24px + env(safe-area-inset-top,0px)) 16px 24px;overflow-y:auto;z-index:40}
+.overlay .panel{width:100%;max-width:1040px}
+
+.storeTable td:first-child{font-weight:500}
+.storeTable tr.click{cursor:pointer}
+.storeTable tr.click:hover td{background:var(--sunk)}
+
+@media (max-width:640px){ h1{font-size:1.5rem} .stat b{font-size:1.3rem} .hide-sm{display:none} }
+@media (prefers-reduced-motion:no-preference){ .ed .cellwrap.changed .cell{transition:outline-color .6s} }
+</style>
+
+<div class="wrap" id="app" aria-live="polite"></div>
+<div id="toastHost"></div>
+
+<datalist id="tipoList">
+  <option value="AM"></option><option value="PM"></option><option value="Rotativo"></option>
+  <option value="Part AM"></option><option value="Part (PM)"></option><option value="S-D (AM)"></option>
+  <option value="L-V (AM) S-D (PM)"></option>
+</datalist>
+
+<script>
+const RAW = {"40":[["","Metro Balta (Chiclayo)","Brigite sulay Fernández morí","Picker","GIG","","09 - 17","09 - 17","DESCANSO","09 - 17","09 - 17","09 - 17","09 - 17"],["","Metro Balta (Chiclayo)","Samantha Cristina Silva Vargas","Picker","GIG","","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22","14 - 22","14 - 22"],["","Metro Balta (Chiclayo)","Xiomara del Milagro Diaz Guerrero","Picker","GIG","","14 - 22","14 - 22","09 - 17","DESCANSO","09 - 17","09 - 17","09 - 17"],["","Metro Balta (Chiclayo)","Carlos Jose Zomaza Montes","Picker Senior","ZWORK","","DESCANSO","14 - 22","14 - 22","14 - 22","14 - 22","14 - 22","14 - 22"],["","Metro Cerro Colorado (Arequipa)","Anayka Mayara Chavez Quispe","Picker","GIG","","14 - 22","14 - 22","08 - 16","DESCANSO","08 - 16","14 - 22","14 - 22"],["","Metro Cerro Colorado (Arequipa)","Elizabeth Choquemaqui Llanllaya","Picker","GIG","","08 - 16","08 - 16","DESCANSO","08 - 16","14 - 22","08 - 16","08 - 16"],["","Metro Cerro Colorado (Arequipa)","José Luis Mamani Jucharo","Picker Senior","ZWORK","","14 - 22","14 - 22","14 - 22","14 - 22","DESCANSO","14 - 22","14 - 22"],["","Metro Chorrillos","Ambar Paola Dum Pereira","Picker","GIG","","14 - 22","14 - 22","14 - 22","DESCANSO","08 - 16","08 - 16","08 - 16"],["","Metro Chorrillos","Diana Julia Bardales Rojas","Picker","GIG","","DESCANSO","08 - 16","08 - 16","08 - 16","08 - 16","08 - 16","08 - 16"],["","Metro Chorrillos","Diego Alfonso Rojas Cabello","Picker","GIG","","14 - 22","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22","14 - 22"],["","Metro Chorrillos","Luis Manuel Yovera Barrios","Picker","GIG","","08 - 16","DESCANSO","14 - 22","14 - 22","14 - 22","14 - 22","14 - 22"],["","Metro Fauccett","Astrid Perez Ortiz","Picker","GIG","","14 - 22","14 - 22","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22"],["","Metro Fauccett","Edson Joel Yong Infantes","Picker","GIG","","08 - 16","DESCANSO","08 - 16","08 - 16","08 - 16","08 - 16","08 - 16"],["","Metro Fauccett","Gema Paredes Calixto","Picker","GIG","","DESCANSO","14 - 22","14 - 22","14 - 22","14 - 22","14 - 22","14 - 22"],["","Metro Fauccett","Karla Alessandra Zapata Henostroza","Picker","GIG","","14 - 22","08 - 16","DESCANSO","14 - 22","08 - 16","08 - 16","08 - 16"],["","Metro La Molina","David Noe Rojas Paucar","Picker","GIG","","08 - 16","08 - 16","DESCANSO","08 - 16","08 - 16","08 - 16","08 - 16"],["","Metro La Molina","Jhonadab Fernando Soria León","Picker","GIG","","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22","14 - 22","14 - 22"],["","Metro La Molina","Johan Joseph Trujillo Rengifo","Picker","GIG","","DESCANSO","14 - 22","08 - 16","14 - 22","14 - 22","14 - 22","14 - 22"],["","Metro Ovalo Papal (Trujillo)","Cristhian Rodolfo Mantilla Albuquerque","Picker","GIG","","14 - 22","DESCANSO","08 - 16","08 - 16","08 - 16","08 - 16","08 - 16"],["","Metro Ovalo Papal (Trujillo)","Daiana Elizabeth Palacio Alayo","Picker","GIG","","DESCANSO","14 - 22","14 - 22","14 - 22","14 - 22","14 - 22","14 - 22"],["","Metro Ovalo Papal (Trujillo)","Luis Diego Fabian Anardo","Picker","GIG","","08 - 16","08 - 16","DESCANSO","14 - 22","08 - 16","08 - 16","08 - 16"],["","Metro Ovalo Papal (Trujillo)","Angie Alexandra Revilla Luján","Picker Senior","ZWORK","","14 - 22","14 - 22","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22"],["","Metro Pershing","Ana Cristina Llaccohua Inca","Picker","GIG","","08 - 16","DESCANSO","08 - 16","08 - 16","08 - 16","08 - 16","08 - 16"],["","Metro Pershing","Karina Isabel Yerba Pizango","Picker","GIG","","14 - 22","08 - 16","08 - 16","DESCANSO","08 - 16","08 - 16","08 - 16"],["","Metro Pershing","Khevin Omar Perez Rossi","Picker","GIG","","14 - 22","14 - 22","DESCANSO","08 - 16","14 - 22","14 - 22","14 - 22"],["","Metro Pershing","Mabel Paredes Zuñiga","Picker","GIG","","08 - 16","08 - 16","DESCANSO","08 - 16","08 - 16","08 - 16","08 - 16"],["","Metro Pershing","Maria De Los Angeles Pacheco Gonzaga","Picker","GIG","","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22","14 - 22","14 - 22"],["","Metro Pershing","Tifanny Jazmin Cavero León","Picker","GIG","","08 - 16","14 - 22","14 - 22","14 - 22","DESCANSO","14 - 22","14 - 22"],["","Metro Pershing","Isabel Arteaga Mendoza","Picker Senior","ZWORK","","DESCANSO","14 - 22","14 - 22","14 - 22","14 - 22","14 - 22","14 - 22"],["","Metro Plaza Norte","Giuliana Carolina Alvarez Hermoza","Picker","GIG","","08 - 16","DESCANSO","08 - 16","08 - 16","08 - 16","08 - 16","08 - 16"],["","Metro Plaza Norte","Ilsse Lucil Zavaleta Ccahua","Picker","GIG","","14 - 22","08 - 16","DESCANSO","14 - 22","08 - 16","14 - 22","14 - 22"],["","Metro Plaza Norte","Marcela Maite Chávez Ocaña","Picker","GIG","","08 - 16","14 - 22","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22"],["","Metro Plaza Norte","Sandro Jhair Rurush Rivera","Picker","GIG","","DESCANSO","08 - 16","08 - 16","08 - 16","14 - 22","08 - 16","08 - 16"],["","Metro Plaza Norte","Sebastian Burgos Tapia","Picker","GIG","","14 - 22","14 - 22","14 - 22","14 - 22","DESCANSO","08 - 16","08 - 16"],["","Metro Plaza Norte","María Girot Gonzalez Castellano","Picker Senior","ZWORK","","14 - 22","14 - 22","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22"],["","Metro San Juan de Lurigancho","Jadeth Brissa Silva Quispe","Picker","GIG","","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22","14 - 22","14 - 22"],["","Metro San Juan de Lurigancho","Leyla Jauregui Montalvo","Picker","GIG","","14 - 22","14 - 22","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22"],["","Metro San Juan de Lurigancho","Sofia Mareli Pretel Rojas","Picker","GIG","","09 - 17","09 - 17","09 - 17","09 - 17","DESCANSO","09 - 17","09 - 17"],["","Metro San Juan de Lurigancho","Lucero Loayza Linares","Picker","GIG","","DESCANSO","09 - 17","09 - 17","09 - 17","09 - 17","09 - 17","09 - 17"],["","Metro San Juan de Lurigancho","David Ramos Baltazar","Picker Senior","ZWORK","","14 - 22","14 - 22","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22"],["","Tottus La Marina","Abel Fernando Campos Cano","Picker","GIG","","08 - 16","08 - 16","08 - 16","DESCANSO","08 - 16","08 - 16","08 - 16"],["","Tottus La Marina","Andrea Miluska Hinostroza Contreras","Picker","GIG","","14 - 22","08 - 16","08 - 16","DESCANSO","08 - 16","08 - 16","08 - 16"],["","Tottus La Marina","Victor Andres Matias Rengifo","Picker","GIG","","DESCANSO","14 - 22","14 - 22","14 - 22","08 - 16","08 - 16","08 - 16"],["","Tottus La Marina","Brandon Angello Garay Garay","Picker","GIG","","14 - 22","14 - 22","DESCANSO","08 - 16","14 - 22","14 - 22","14 - 22"],["","Tottus La Marina","Eulis Ramón Salazar López","Picker","GIG","","14 - 22","DESCANSO","14 - 22","08 - 16","14 - 22","14 - 22","14 - 22"],["","Tottus La Marina","Miluska Verónica Davila Mendoza","Picker","GIG","","08 - 16","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22","14 - 22"],["","Tottus La Marina","Maria de los Angeles Reyna Arrunategui","Picker Senior","ZWORK","","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22","14 - 22","14 - 22"],["","Tottus MFC Panama","Anjhely de los Angeles Suárez Ortíz","Picker","GIG","","08 - 12","08 - 12","08 - 12","DESCANSO","08 - 12","08 - 12","08 - 12"],["","Tottus MFC Panama","Antonella Naysha Rengifo Lopez","Picker","GIG","","08 - 16","08 - 16","DESCANSO","08 - 16","08 - 16","14 - 22","14 - 22"],["","Tottus MFC Panama","Ariana Nicole Mamani Benitez","Picker","GIG","","14 - 22","14 - 22","08 - 16","08 - 16","08 - 12","14 - 22","14 - 22"],["","Tottus MFC Panama","Brissa Carla Morales Inchisana","Picker","GIG","","DESCANSO","14 - 22","14 - 22","08 - 16","08 - 16","08 - 16","08 - 16"],["","Tottus MFC Panama","Jose Luis Aguilar Herrera","Picker","GIG","","08 - 16","DESCANSO","08 - 16","14 - 22","DESCANSO","08 - 16","08 - 16"],["","Tottus MFC Panama","Nicolas Enrique Guillén Linares","Picker","GIG","","14 - 22","DESCANSO","08 - 12","08 - 12","08 - 16","18 - 22","18 - 22"],["","Tottus MFC Panama","Piero Eduardo Bravo Quinto","Picker","GIG","","08 - 16","14 - 22","DESCANSO","14 - 22","08 - 16","08 - 16","08 - 16"],["","Tottus MFC Panama","Rosa Yemima Alvarez Maldonado","Picker","GIG","","14 - 22","08 - 16","DESCANSO","14 - 22","14 - 22","08 - 16","08 - 16"],["","Tottus MFC Panama","Ruth Isabel Huamani Pachau","Picker","GIG","","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22","14 - 22","14 - 22"],["","Tottus MFC Panama","Selma Antonia Ninahuanca Chicoma","Picker","GIG","","14 - 22","08 - 16","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22"],["","Tottus MFC Panama","Joel Anderson Raymundo Huallpa","Picker Senior","ZWORK","","14 - 22","14 - 22","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22"],["","Tottus Punta Hermosa","Andrea Rojas Briceño","Picker","GIG","","09 - 17","09 - 17","DESCANSO","11 - 19","09 - 17","09 - 17","09 - 17"],["","Tottus Punta Hermosa","Diego SAlvador Iman Arrue","Picker","GIG","","10 - 18","DESCANSO","09 - 17","09 - 17","10 - 18","10 - 18","10 - 18"],["","Tottus Punta Hermosa","Xiomara Sthepany Hurtado Paredes","Picker","GIG","","11 - 19","11 - 19","11 - 19","DESCANSO","11 - 19","11 - 19","11 - 19"],["","Wong Ate","Davis Aaron Toledo Perez","Picker","GIG","","08 - 16","08 - 16","08 - 16","DESCANSO","08 - 16","08 - 16","08 - 16"],["","Wong Ate","Joshua Gerhard Quispe Contreras","Picker","GIG","","14 - 22","DESCANSO","14 - 22","08 - 16","14 - 22","14 - 22","14 - 22"],["","Wong Ate","Miriam Marcañaupa","Picker","GIG","","14 - 22","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22","14 - 22"],["","Wong Benavides","Ariel Alejandro Garfias Povis","Picker","GIG","","08 - 16","08 - 16","DESCANSO","08 - 16","14 - 22","14 - 22","14 - 22"],["","Wong Benavides","David Daniel Padilla Ocampo","Picker","GIG","","14 - 22","14 - 22","08 - 16","DESCANSO","14 - 22","14 - 22","14 - 22"],["","Wong Camacho","Dante Carlos Diaz Clemente","Picker","GIG","","14 - 22","DESCANSO","14 - 22","08 - 16","08 - 16","14 - 22","08 - 16"],["","Wong Camacho","Jose Bruno Josph Lara Camara","Picker","GIG","","14 - 22","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22","14 - 22"],["","Wong Camacho","Leyla Marleny Nima Bastidas","Picker","GIG","","08 - 16","08 - 16","08 - 16","DESCANSO","14 - 22","08 - 16","14 - 22"],["","Wong Chacarilla","Ana Maria Honorio Gamarra","Picker","GIG","","08 - 16","08 - 16","14 - 22","DESCANSO","14 - 22","08 - 16","08 - 16"],["","Wong Chacarilla","Anamyle Alessandra Yarleque Yarleque","Picker","GIG","","DESCANSO","14 - 22","08 - 16","08 - 16","14 - 22","08 - 16","08 - 16"],["","Wong Chacarilla","Cesar Alexander Rojas Apcho","Picker","GIG","","14 - 22","08 - 16","08 - 16","08 - 16","14 - 22","14 - 22","14 - 22"],["","Wong Chacarilla","Diego Ricardo Alberco Ignacio","Picker","GIG","","08 - 16","08 - 16","14 - 22","14 - 22","DESCANSO","08 - 16","14 - 22"],["","Wong Chacarilla","Fabian Aldair Legua Arroyo","Picker","GIG","","14 - 22","14 - 22","08 - 16","14 - 22","08 - 16","14 - 22","14 - 22"],["","Wong Chacarilla","Gepsiva Paola Chavez Durand","Picker","GIG","","14 - 22","14 - 22","DESCANSO","14 - 22","08 - 16","14 - 22","08 - 16"],["","Wong Chacarilla","Gonzalo Huaccha Arroyo","Picker","GIG","","08 - 16","RETIRO","RETIRO","RETIRO","RETIRO","RETIRO","RETIRO"],["","Wong Chacarilla","Luz Geraldine Salcedo Guevara","Picker","GIG","","14 - 22","14 - 22","14 - 22","DESCANSO","14 - 22","14 - 22","08 - 16"],["","Wong Chacarilla","Alex Ramos","Picker Senior","ZWORK","","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22","14 - 22","14 - 22"],["","Wong Dos de Mayo","Juan Martín Calet Olazabal Guerra","Picker","GIG","","14 - 22","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22","14 - 22"],["","Wong Dos de Mayo","Silvia Hammer Moncada","Picker","GIG","","DESCANSO","14 - 22","14 - 22","08 - 16","08 - 16","08 - 16","08 - 16"],["","Wong Dos de Mayo","Yadhira Abigail Fernández Atuncar","Picker","GIG","","08 - 16","DESCANSO","08 - 16","14 - 22","08 - 16","08 - 16","08 - 16"],["","Wong San Miguel","Claudia Maria Clisanchez Cala","Picker","GIG","","10 - 18","10 - 18","DESCANSO","14 - 22","10 - 18","14 - 22","14 - 22"],["","Wong San Miguel","Ivone Michel Valera Querales","Picker","GIG","","14 - 22","14 - 22","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22"],["","Wong San Miguel","Melany Fraiby Pimento Maestre","Picker","GIG","","DESCANSO","10 - 18","10 - 18","10 - 18","14 - 22","10 - 18","10 - 18"],["","Wong San Miguel","Michael Johan Vargas Gutierrez","Picker","GIG","","14 - 22","14 - 22","14 - 22","14 - 22","DESCANSO","14 - 22","14 - 22"],["","Wong San Miguel","Zailys Margarelys Piña Aguero","Picker","GIG","","10 - 18","DESCANSO","10 - 18","10 - 18","10 - 18","10 - 18","10 - 18"]],"41":[["AM","Metro Balta (Chiclayo)","Brigite sulay Fernández morí","Picker","GIG","","09 - 17","09 - 17","09 - 17","DESCANSO","09 - 17","09 - 17","09 - 17"],["PM","Metro Balta (Chiclayo)","Samantha Cristina Silva Vargas","Picker","GIG","","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22","14 - 22","14 - 22"],["Rotativo","Metro Balta (Chiclayo)","Xiomara del Milagro Diaz Guerrero","Picker","GIG","","14 - 22","14 - 22","09 - 17","DESCANSO","09 - 17","09 - 17","09 - 17"],["","Metro Balta (Chiclayo)","Carlos Jose Zomaza Montes","Picker Senior","ZWORK","","DESCANSO","14 - 22","14 - 22","14 - 22","14 - 22","14 - 22","14 - 22"],["","Metro Cerro Colorado (Arequipa)","Anayka Mayara Chavez Quispe","Picker","GIG","","14 - 22","14 - 22","08 - 16","DESCANSO","08 - 16","14 - 22","14 - 22"],["","Metro Cerro Colorado (Arequipa)","Elizabeth Choquemaqui Llanllaya","Picker","GIG","","08 - 16","08 - 16","DESCANSO","08 - 16","14 - 22","08 - 16","08 - 16"],["","Metro Cerro Colorado (Arequipa)","José Luis Mamani Jucharo","Picker Senior","ZWORK","","14 - 22","14 - 22","14 - 22","14 - 22","DESCANSO","14 - 22","14 - 22"],["Rotativo","Metro Chorrillos","Ambar Paola Dum Pereira","Picker","GIG","JUEVES","14 - 22","14 - 22","14 - 22","DESCANSO","08 - 16","08 - 16","08 - 16"],["Rotativo","Metro Chorrillos","Diego Alfonso Rojas Cabello","Picker","GIG","MIÉRCOLES","14 - 22","08 - 16","DESCANSO","08 - 16","14 - 22","14 - 22","14 - 22"],["Rotativo","Metro Chorrillos","Luis Manuel Yovera Barrios","Picker","GIG","MARTES","08 - 16","DESCANSO","08 - 16","14 - 22","14 - 22","14 - 22","14 - 22"],["","Metro Fauccett","Edson Joel Yong Infantes","Picker","GIG","MARTES","08 - 16","DESCANSO","08 - 16","08 - 16","08 - 16","14 - 22","08 - 16"],["","Metro Fauccett","Gema Paredes Calixto","Picker","GIG","JUEVES","14 - 22","14 - 22","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22"],["","Metro Fauccett","Karla Alessandra Zapata Henostroza","Picker","GIG","MIÉRCOLES","14 - 22","08 - 16","DESCANSO","14 - 22","14 - 22","08 - 16","14 - 22"],["","Metro La Molina","David Noe Rojas Paucar","Picker","GIG","","14 - 22","08 - 16","DESCANSO","14 - 22","08 - 16","08 - 16","08 - 16"],["","Metro La Molina","Jhonadab Fernando Soria León","Picker","GIG","","14 - 22","DESCANSO","08 - 16","14 - 22","08 - 16","08 - 16","14 - 22"],["","Metro La Molina","Braulio Jesus Mamani Venancino","Picker","GIG","","DESCANSO","14 - 22","08 - 16","14 - 22","14 - 22","14 - 22","14 - 22"],["","Metro Ovalo Papal (Trujillo)","Cristhian Rodolfo Mantilla Albuquerque","Picker","GIG","","14 - 22","DESCANSO","08 - 16","08 - 16","08 - 16","08 - 16","08 - 16"],["","Metro Ovalo Papal (Trujillo)","Daiana Elizabeth Palacio Alayo","Picker","GIG","","DESCANSO","14 - 22","14 - 22","14 - 22","14 - 22","14 - 22","14 - 22"],["","Metro Ovalo Papal (Trujillo)","Luis Diego Fabian Anardo","Picker","GIG","","08 - 16","08 - 16","DESCANSO","14 - 22","08 - 16","08 - 16","08 - 16"],["","Metro Ovalo Papal (Trujillo)","Angie Alexandra Revilla Luján","Picker Senior","ZWORK","","14 - 22","14 - 22","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22"],["S-D (AM)","Metro Pershing","Ana Cristina Llaccohua Inca","Picker","GIG","","08 - 16","DESCANSO","08 - 16","08 - 16","08 - 16","08 - 16","08 - 16"],["","Metro Pershing","Karina Isabel Yerba Pizango","Picker","GIG","","14 - 22","08 - 16","08 - 16","DESCANSO","08 - 16","08 - 16","08 - 16"],["","Metro Pershing","Khevin Omar Perez Rossi","Picker","GIG","","14 - 22","14 - 22","DESCANSO","08 - 16","14 - 22","14 - 22","14 - 22"],["","Metro Pershing","Mabel Paredes Zuñiga","Picker","GIG","","08 - 16","08 - 16","DESCANSO","08 - 16","08 - 16","08 - 16","08 - 16"],["","Metro Pershing","Maria De Los Angeles Pacheco Gonzaga","Picker","GIG","","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22","14 - 22","14 - 22"],["","Metro Pershing","Tifanny Jazmin Cavero León","Picker","GIG","","08 - 16","14 - 22","14 - 22","14 - 22","DESCANSO","14 - 22","14 - 22"],["","Metro Pershing","Isabel Arteaga Mendoza","Picker Senior","ZWORK","","DESCANSO","14 - 22","14 - 22","14 - 22","14 - 22","14 - 22","14 - 22"],["","Metro Plaza Norte","Giuliana Carolina Alvarez Hermoza","Picker","GIG","","08 - 16","DESCANSO","08 - 16","08 - 16","08 - 16","08 - 16","08 - 16"],["","Metro Plaza Norte","Ilsse Lucil Zavaleta Ccahua","Picker","GIG","","14 - 22","08 - 16","DESCANSO","14 - 22","08 - 16","14 - 22","14 - 22"],["","Metro Plaza Norte","Marcela Maite Chávez Ocaña","Picker","GIG","","08 - 16","14 - 22","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22"],["","Metro Plaza Norte","Sandro Jhair Rurush Rivera","Picker","GIG","","DESCANSO","08 - 16","08 - 16","08 - 16","14 - 22","08 - 16","08 - 16"],["PM","Metro Plaza Norte","Sebastian Burgos Tapia","Picker","GIG","","14 - 22","14 - 22","14 - 22","14 - 22","DESCANSO","08 - 16","08 - 16"],["","Metro Plaza Norte","María Girot Gonzalez Castellano","Picker Senior","ZWORK","","14 - 22","14 - 22","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22"],["","Metro San Juan de Lurigancho","Jadeth Brissa Silva Quispe","Picker","GIG","","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22","14 - 22","14 - 22"],["","Metro San Juan de Lurigancho","Leyla Jauregui Montalvo","Picker","GIG","","14 - 22","14 - 22","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22"],["","Metro San Juan de Lurigancho","Sofia Mareli Pretel Rojas","Picker","GIG","","09 - 17","09 - 17","09 - 17","09 - 17","DESCANSO","09 - 17","09 - 17"],["","Metro San Juan de Lurigancho","Lucero Loayza Linares","Picker","GIG","","DESCANSO","09 - 17","09 - 17","09 - 17","09 - 17","09 - 17","09 - 17"],["","Metro San Juan de Lurigancho","David Ramos Baltazar","Picker Senior","ZWORK","","14 - 22","14 - 22","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22"],["","Tottus La Marina","Abel Fernando Campos Cano","Picker","GIG","","08 - 16","08 - 16","08 - 16","DESCANSO","08 - 16","08 - 16","08 - 16"],["","Tottus La Marina","Andrea Miluska Hinostroza Contreras","Picker","GIG","","14 - 22","08 - 16","08 - 16","DESCANSO","08 - 16","08 - 16","08 - 16"],["","Tottus La Marina","Victor Andres Matias Rengifo","Picker","GIG","","DESCANSO","14 - 22","14 - 22","14 - 22","08 - 16","08 - 16","08 - 16"],["","Tottus La Marina","Brandon Angello Garay Garay","Picker","GIG","","14 - 22","14 - 22","DESCANSO","08 - 16","14 - 22","14 - 22","14 - 22"],["","Tottus La Marina","Eulis Ramón Salazar López","Picker","GIG","","14 - 22","DESCANSO","14 - 22","08 - 16","14 - 22","14 - 22","14 - 22"],["","Tottus La Marina","Miluska Verónica Davila Mendoza","Picker","GIG","","08 - 16","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22","14 - 22"],["","Tottus La Marina","Maria de los Angeles Reyna Arrunategui","Picker Senior","ZWORK","","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22","14 - 22","14 - 22"],["Part AM","Tottus MFC Panama","Anjhely de los Angeles Suárez Ortíz","Picker","GIG","JUEVES","09 - 13","09 - 13","09 - 13","DESCANSO","09 - 13","09 - 13","09 - 13"],["V-S-D (AM)","Tottus MFC Panama","Antonella Naysha Rengifo Lopez","Picker","GIG","MIÉRCOLES","14 - 22","14 - 22","DESCANSO","14 - 22","08 - 16","08 - 16","08 - 16"],["Rotativo","Tottus MFC Panama","Ariana Nicole Mamani Benitez","Picker","GIG","VIERNES","08 - 16","08 - 16","14 - 22","08 - 16","DESCANSO","08 - 16","08 - 16"],["L-J-D (AM)","Tottus MFC Panama","Brissa Carla Morales Inchisana","Picker","GIG","LUNES","DESCANSO","14 - 22","14 - 22","08 - 16","14 - 22","14 - 22","14 - 22"],["Rotativo","Tottus MFC Panama","Jose Luis Aguilar Herrera","Picker","GIG","VIERNES","14 - 22","14 - 22","08 - 16","08 - 16","DESCANSO","14 - 22","14 - 22"],["Part (PM)","Tottus MFC Panama","Nicolas Enrique Guillén Linares","Picker","GIG","MARTES","18 - 22","DESCANSO","18 - 22","18 - 22","18 - 22","18 - 22","18 - 22"],["L-V (AM) S-D (PM)","Tottus MFC Panama","Piero Eduardo Bravo Quinto","Picker","GIG","MIÉRCOLES","08 - 16","08 - 16","DESCANSO","08 - 16","08 - 16","14 - 22","14 - 22"],["Rotativo","Tottus MFC Panama","Rosa Yemima Alvarez Maldonado","Picker","GIG","LUNES","DESCANSO","14 - 22","08 - 16","14 - 22","14 - 22","08 - 16","08 - 16"],["Part","Tottus MFC Panama","Ruth Isabel Huamani Pachau","Picker","GIG","MARTES","18 - 22","DESCANSO","18 - 22","18 - 22","18 - 22","18 - 22","18 - 22"],["AM","Tottus MFC Panama","Selma Antonia Ninahuanca Chicoma","Picker","GIG","JUEVES","08 - 16","08 - 16","08 - 16","DESCANSO","08 - 16","08 - 16","08 - 16"],["PM","Tottus MFC Panama","Joel Anderson Raymundo Huallpa","Picker Senior","ZWORK","MIÉRCOLES","14 - 22","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22","14 - 22"],["","Tottus Punta Hermosa","Andrea Rojas Briceño","Picker","GIG","","09 - 17","09 - 17","DESCANSO","11 - 19","09 - 17","09 - 17","09 - 17"],["","Tottus Punta Hermosa","Diego SAlvador Iman Arrue","Picker","GIG","","10 - 18","DESCANSO","09 - 17","09 - 17","10 - 18","10 - 18","10 - 18"],["","Tottus Punta Hermosa","Xiomara Sthepany Hurtado Paredes","Picker","GIG","","11 - 19","11 - 19","11 - 19","DESCANSO","11 - 19","11 - 19","11 - 19"],["","Wong Ate","Davis Aaron Toledo Perez","Picker","GIG","","08 - 16","08 - 16","08 - 16","DESCANSO","08 - 16","08 - 16","08 - 16"],["","Wong Ate","Joshua Gerhard Quispe Contreras","Picker","GIG","","14 - 22","DESCANSO","14 - 22","08 - 16","14 - 22","14 - 22","14 - 22"],["","Wong Ate","Miriam Marcañaupa","Picker","GIG","","14 - 22","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22","14 - 22"],["","Wong Benavides","Ariel Alejandro Garfias Povis","Picker","GIG","","08 - 16","08 - 16","DESCANSO","08 - 16","14 - 22","14 - 22","14 - 22"],["","Wong Benavides","David Daniel Padilla Ocampo","Picker","GIG","","14 - 22","14 - 22","08 - 16","DESCANSO","14 - 22","14 - 22","14 - 22"],["","Wong Camacho","Dante Carlos Diaz Clemente","Picker","GIG","","14 - 22","DESCANSO","14 - 22","08 - 16","08 - 16","14 - 22","08 - 16"],["","Wong Camacho","Jose Bruno Josph Lara Camara","Picker","GIG","","14 - 22","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22","14 - 22"],["","Wong Camacho","Leyla Marleny Nima Bastidas","Picker","GIG","","08 - 16","08 - 16","08 - 16","DESCANSO","14 - 22","08 - 16","14 - 22"],["","Wong Chacarilla","Ana Maria Honorio Gamarra","Picker","GIG","","08 - 16","08 - 16","14 - 22","DESCANSO","14 - 22","08 - 16","08 - 16"],["","Wong Chacarilla","Anamyle Alessandra Yarleque Yarleque","Picker","GIG","","DESCANSO","14 - 22","08 - 16","08 - 16","14 - 22","08 - 16","08 - 16"],["","Wong Chacarilla","Cesar Alexander Rojas Apcho","Picker","GIG","","14 - 22","08 - 16","08 - 16","08 - 16","14 - 22","14 - 22","14 - 22"],["","Wong Chacarilla","Diego Ricardo Alberco Ignacio","Picker","GIG","","08 - 16","08 - 16","14 - 22","14 - 22","DESCANSO","08 - 16","14 - 22"],["","Wong Chacarilla","Fabian Aldair Legua Arroyo","Picker","GIG","","14 - 22","14 - 22","08 - 16","14 - 22","08 - 16","14 - 22","14 - 22"],["","Wong Chacarilla","Gepsiva Paola Chavez Durand","Picker","GIG","","14 - 22","14 - 22","DESCANSO","14 - 22","08 - 16","14 - 22","08 - 16"],["","Wong Chacarilla","Gonzalo Huaccha Arroyo","Picker","GIG","","08 - 16","RETIRO","RETIRO","RETIRO","RETIRO","RETIRO","RETIRO"],["","Wong Chacarilla","Luz Geraldine Salcedo Guevara","Picker","GIG","","14 - 22","14 - 22","14 - 22","DESCANSO","14 - 22","14 - 22","08 - 16"],["","Wong Chacarilla","Alex Ramos","Picker Senior","ZWORK","","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22","14 - 22","14 - 22"],["","Wong Dos de Mayo","Juan Martín Calet Olazabal Guerra","Picker","GIG","","14 - 22","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22","14 - 22"],["","Wong Dos de Mayo","Silvia Hammer Moncada","Picker","GIG","","DESCANSO","14 - 22","14 - 22","08 - 16","08 - 16","08 - 16","08 - 16"],["","Wong Dos de Mayo","Yadhira Abigail Fernández Atuncar","Picker","GIG","","08 - 16","DESCANSO","08 - 16","14 - 22","08 - 16","08 - 16","08 - 16"],["","Wong San Miguel","Claudia Maria Clisanchez Cala","Picker","GIG","","10 - 18","10 - 18","DESCANSO","14 - 22","10 - 18","14 - 22","14 - 22"],["","Wong San Miguel","Ivone Michel Valera Querales","Picker","GIG","","14 - 22","14 - 22","14 - 22","DESCANSO","14 - 22","14 - 22","14 - 22"],["","Wong San Miguel","Melany Fraiby Pimento Maestre","Picker","GIG","","DESCANSO","10 - 18","10 - 18","10 - 18","14 - 22","10 - 18","10 - 18"],["","Wong San Miguel","Michael Johan Vargas Gutierrez","Picker","GIG","","14 - 22","14 - 22","14 - 22","14 - 22","DESCANSO","14 - 22","14 - 22"],["","Wong San Miguel","Zailys Margarelys Piña Aguero","Picker","GIG","","10 - 18","DESCANSO","10 - 18","10 - 18","10 - 18","10 - 18","10 - 18"]]};
+const DAYS=['LUNES','MARTES','MIÉRCOLES','JUEVES','VIERNES','SÁBADO','DOMINGO'];
+const DS=['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
+const PLAN_WEEKS=[]; for(let w=41;w<=54;w++) PLAN_WEEKS.push(w);
+const SHIFT_OPTS=['08 - 16','09 - 17','10 - 18','11 - 19','14 - 22','08 - 12','09 - 13','18 - 22'];
+const SPECIAL=['DESCANSO','VACACIONES','LICENCIA','RETIRO'];
+const MAX_H=48;
+
+/* ---------- datos base ---------- */
+const STORES=[]; ['40','41'].forEach(w=>RAW[w].forEach(r=>{ if(!STORES.includes(r[1])) STORES.push(r[1]); }));
+const slug=s=>s.normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+const SHEET={};
+['40','41'].forEach(w=>{ const by={}; STORES.forEach(s=>by[s]=[]);
+  RAW[w].forEach((r,i)=>by[r[1]].push({id:`x${w}-${i}`,tipo:r[0],name:r[2],rol:r[3],mod:r[4],descanso:r[5],days:r.slice(6,13),manual:[]}));
+  SHEET[+w]=by; });
+const clone=o=>JSON.parse(JSON.stringify(o));
+let seq=0; const newId=()=>'p'+Date.now().toString(36)+(seq++).toString(36);
+
+/* ---------- semanas ISO ---------- */
+const MES=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+function monday(w){ return new Date(2025,11,29+7*(w-1)); }
+function range(w){ const a=monday(w), b=new Date(a); b.setDate(a.getDate()+6);
+  return a.getMonth()===b.getMonth()? `${a.getDate()}–${b.getDate()} ${MES[b.getMonth()]}` : `${a.getDate()} ${MES[a.getMonth()]} – ${b.getDate()} ${MES[b.getMonth()]}${b.getFullYear()!==a.getFullYear()?' '+b.getFullYear():''}`; }
+
+/* ---------- turnos ---------- */
+function parse(v){ const m=/^(\d{1,2})\s*-\s*(\d{1,2})$/.exec(v||''); if(!m) return null; const s=+m[1], e=+m[2]; return {s,e,h:(e-s+24)%24}; }
+function norm(v){ v=(v||'').trim(); const p=parse(v); if(p) return `${String(p.s).padStart(2,'0')} - ${String(p.e).padStart(2,'0')}`; return v.toUpperCase(); }
+function kind(v){ if(!v) return 'off'; const p=parse(v); if(p) return p.h<6?'pt':(p.s<12?'am':'pm');
+  if(v==='DESCANSO') return 'off'; return 'ret'; }
+const isWork=v=>!!parse(v);
+const hoursOf=p=>p.days.reduce((a,v)=>a+(parse(v)?.h||0),0);
+const retired=p=>p.days[6]==='RETIRO';
+function mostCommon(arr){ const c={}; arr.forEach(x=>c[x]=(c[x]||0)+1); return Object.keys(c).sort((a,b)=>c[b]-c[a])[0]; }
+function typical(p,k){ const ws=p.days.filter(v=>isWork(v)&&(!k||kind(v)===k)); return mostCommon(ws); }
+function coverage(people){ return DAYS.map((_,i)=>{ const c={am:0,pm:0,pt:0}; people.forEach(p=>{ const k=kind(p.days[i]); if(c[k]!==undefined) c[k]++; }); return c; }); }
+
+/* ---------- estado ---------- */
+let plans={}; let storage='cargando'; let db=null, downloads=null;
+const drafts={}; // key -> {people}
+const key=(w,s)=>`w${w}--${slug(s)}`;
+const ui={view:'summary', sumWeek:40, planWeek:41, store:null, detail:null, changed:new Set(), notes:null, confirmDel:null};
+
+function effective(w,s){
+  const p=plans[key(w,s)]; if(p) return {status:p.status, people:p.people, source:'guardado', updatedAt:p.updatedAt};
+  if(w===40) return {status:'excel', people:SHEET[40][s]||[], source:'excel'};
+  if(w===41) return {status:'revisar', people:SHEET[41][s]||[], source:'excel'};
+  if(w>41){ const prev=effective(w-1,s); return {status:'revisar', people:prev.people.filter(p=>!retired(p)).map(p=>({...clone(p),manual:[]})), source:'sugerido'}; }
+  return {status:'revisar', people:[], source:'vacío'};
+}
+function weekPeople(w){ return STORES.flatMap(s=>effective(w,s).people); }
+
+/* ---------- persistencia ---------- */
+const LS='peya-turnos-plans';
+function loadLocal(){ try{ plans=JSON.parse(localStorage.getItem(LS)||'{}')||{}; }catch(e){ plans={}; } }
+function saveLocal(){ try{ localStorage.setItem(LS,JSON.stringify(plans)); }catch(e){} }
+async function boot(){
+  loadLocal(); storage='local';
+  const use=window.claude?.use;
+  if(use){
+    try{ downloads=await window.claude.use('downloads'); }catch(e){ downloads=null; }
+    try{ db=await window.claude.use('db'); }catch(e){ db=null; }
+    if(db){
+      db.collection('plans').limit(1000).onSnapshot(snap=>{
+        const next={}; snap.docs.forEach(d=>{ const x=d.data(); if(x&&x.week&&x.store) next[key(x.week,x.store)]=x; });
+        plans=next; storage='db'; if(ui.view!=='editor') render(); else renderEditorStatus();
+      }, err=>{ storage='local'; db=null; toast('No se pudo conectar con la base compartida. Los cambios se guardan solo en este navegador.'); render(); });
+    }
+  }
+  render();
+}
+async function persist(w,s,people){
+  const body={week:w, store:s, status:'planificado', people:clone(people), updatedAt:new Date().toISOString()};
+  plans[key(w,s)]=body;
+  if(db){ try{ await db.doc('plans/'+key(w,s)).set(body); return true; }
+    catch(e){ toast(e?.code==='quota_exceeded'?'La base está llena. Elimina semanas antiguas para seguir guardando.':'No se pudo guardar en la base compartida. Quedó guardado en este navegador.'); saveLocal(); return false; } }
+  saveLocal(); return true;
+}
+
+/* ---------- reglas de "Actualizar" ---------- */
+const LETTER={L:0,M:1,MI:2,X:2,J:3,V:4,S:5,D:6};
+function tipoPattern(tipo,p){
+  const t=(tipo||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase().trim(); const pat=Array(7).fill(null);
+  if(!t||t.includes('ROTATIVO')) return pat;
+  const amS=typical(p,'am')||'08 - 16', pmS=typical(p,'pm')||'14 - 22';
+  if(t.includes('PART')){ if(t.includes('PM')) pat.fill(typical(p,'pt')&&parse(typical(p,'pt')).s>=12?typical(p,'pt'):'18 - 22');
+    else if(t.includes('AM')) pat.fill(typical(p,'pt')&&parse(typical(p,'pt')).s<12?typical(p,'pt'):'09 - 13'); return pat; }
+  const re=/((?:MI|[LMXJVSD])(?:\s*-\s*(?:MI|[LMXJVSD]))*)\s*\(\s*(AM|PM)\s*\)/g; let m, any=false;
+  while((m=re.exec(t))){ any=true; const toks=m[1].split('-').map(x=>LETTER[x.trim()]); let idx=toks;
+    if(toks.length===2&&toks[0]<=toks[1]){ idx=[]; for(let i=toks[0];i<=toks[1];i++) idx.push(i); }
+    idx.forEach(i=>{ if(i!==undefined) pat[i]=m[2]==='AM'?amS:pmS; }); }
+  if(!any){ if(/\bAM\b/.test(t)) pat.fill(amS); else if(/\bPM\b/.test(t)) pat.fill(pmS); }
+  return pat;
+}
+function applyRules(people){
+  const changed=new Set(), notes=[];
+  people.forEach(p=>{
+    if(retired(p)) return;
+    const before=p.days.slice(), man=new Set(p.manual||[]);
+    if(p.descanso){ const di=DAYS.indexOf(p.descanso);
+      if(di>=0 && !man.has(di) && p.days[di]!=='DESCANSO'){
+        const fill=typical(p)||'08 - 16'; p.days[di]='DESCANSO';
+        p.days.forEach((v,i)=>{ if(i!==di && v==='DESCANSO' && !man.has(i)) p.days[i]=fill; }); } }
+    const pat=tipoPattern(p.tipo,p);
+    pat.forEach((s,i)=>{ if(s && isWork(p.days[i]) && !man.has(i)) p.days[i]=s; });
+    before.forEach((v,i)=>{ if(v!==p.days[i]) changed.add(p.id+':'+i); });
+    const h=hoursOf(p); if(h>MAX_H) notes.push(`${p.name}: ${h} h programadas, supera el máximo de ${MAX_H} h semanales.`);
+    if(!p.days.some(v=>v==='DESCANSO')) notes.push(`${p.name}: no tiene día de descanso.`);
+  });
+  coverage(people).forEach((c,i)=>{ if(people.length){ if(!c.am) notes.push(`${DAYS[i]}: nadie en turno AM.`); if(!c.pm) notes.push(`${DAYS[i]}: nadie en turno PM.`); } });
+  return {changed,notes};
+}
+
+/* ---------- utilidades UI ---------- */
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function chip(v){ const k=kind(v); return `<span class="chip k-${k}">${esc(v||'—')}</span>`; }
+function pill(status,dirty){ const base= status==='planificado'?'<span class="pill ok">Planificado</span>': status==='excel'?'<span class="pill ok">Ejecutado</span>':'<span class="pill rev">Por revisar</span>';
+  return base+(dirty?' <span class="pill draft">Cambios sin aplicar</span>':''); }
+function chainOf(s){ return s.split(' ')[0]; }
+function cityOf(s){ const m=/\(([^)]+)\)/.exec(s); return m?m[1]:'Lima'; }
+function toast(msg){ const h=document.getElementById('toastHost'); h.innerHTML=`<div class="toast" role="status">${esc(msg)}</div>`; clearTimeout(toast.t); toast.t=setTimeout(()=>h.innerHTML='',3800); }
+function storageNote(){ return storage==='db'?'Guardado en la base compartida del artifact.':storage==='local'?'Guardado solo en este navegador (la base compartida no está disponible en esta vista).':'Conectando…'; }
+function fmtTime(iso){ if(!iso) return '—'; const d=new Date(iso); return `${d.getDate()} ${MES[d.getMonth()]} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; }
+
+/* ---------- vistas ---------- */
+function render(){ const app=document.getElementById('app');
+  if(ui.view==='summary') app.innerHTML=viewSummary();
+  else if(ui.view==='plan') app.innerHTML=viewPlan();
+  else app.innerHTML=viewEditor();
+}
+
+function summaryWeeks(){ const ws=new Set([40,41]); Object.values(plans).forEach(p=>ws.add(p.week)); return [...ws].sort((a,b)=>a-b); }
+
+function viewSummary(){
+  const w=ui.sumWeek, people=weekPeople(w).filter(p=>!retired(p));
+  const hrs=people.reduce((a,p)=>a+hoursOf(p),0), sen=people.filter(p=>/senior/i.test(p.rol)).length;
+  const cov=coverage(people); const tot=cov.map(c=>c.am+c.pm+c.pt); const maxDay=Math.max(...tot), peakDay=DAYS[tot.indexOf(maxDay)].toLowerCase();
+  const label= w===40?'Semana previa':(w===41&&!STORES.some(s=>plans[key(41,s)])?'Borrador del Excel':'Semana planificada');
+  const cards=STORES.map(s=>{ const ps=effective(w,s).people.filter(p=>!retired(p)); if(!ps.length) return '';
+    const c=coverage(ps), mx=Math.max(1,...c.map(x=>x.am+x.pm+x.pt));
+    const bars=c.map(x=>`<div class="bar" title="AM ${x.am} · PM ${x.pm} · Part ${x.pt}">${x.am?`<span class="s-am" style="height:${x.am/mx*100}%"></span>`:''}${x.pm?`<span class="s-pm" style="height:${x.pm/mx*100}%"></span>`:''}${x.pt?`<span class="s-pt" style="height:${x.pt/mx*100}%"></span>`:''}</div>`).join('');
+    return `<button class="store" data-act="detail" data-store="${esc(s)}">
+      <div class="row1"><div><div class="chain">${esc(chainOf(s))} · ${esc(cityOf(s))}</div><div class="name">${esc(s)}</div></div></div>
+      <div class="meta"><span><b>${ps.length}</b> personas</span><span><b>${ps.reduce((a,p)=>a+hoursOf(p),0)}</b> h</span><span><b>${ps.filter(p=>/senior/i.test(p.rol)).length}</b> senior</span></div>
+      <div class="bars" aria-hidden="true">${bars}</div><div class="barlabels" aria-hidden="true">${DS.map(d=>`<span>${d[0]}</span>`).join('')}</div>
+    </button>`; }).join('');
+  return `
+  <header class="topbar">
+    <div class="titles"><span class="eyebrow">${label} · S${w} · ${range(w)}</span><h1>Horarios por tienda</h1>
+      <span class="muted">Base tomada de “Planificación de horarios PeYA”. Toca una tienda para ver el detalle por persona.</span></div>
+    <div class="actions">
+      <div class="field"><label for="sumWeek">Ver semana</label><select id="sumWeek">${summaryWeeks().map(x=>`<option value="${x}" ${x===w?'selected':''}>S${x} · ${range(x)}</option>`).join('')}</select></div>
+      <button class="btn" data-act="export" data-week="${w}">Exportar Excel S${w}</button>
+      <button class="btn primary" data-act="goPlan">Planificar nueva semana</button>
+    </div>
+  </header>
+  <section class="stats" aria-label="Resumen de la semana">
+    <div class="stat"><b>${STORES.filter(s=>effective(w,s).people.some(p=>!retired(p))).length}</b><span>tiendas</span></div>
+    <div class="stat"><b>${people.length}</b><span>zubaleros activos</span></div>
+    <div class="stat"><b>${sen}</b><span>Picker Senior (ZWORK)</span></div>
+    <div class="stat"><b class="num">${hrs.toLocaleString('es-PE')}</b><span>horas programadas</span></div>
+    <div class="stat"><b>${maxDay}</b><span>personas el día pico (${peakDay})</span></div>
+  </section>
+  <div class="legend"><span><i class="k-am"></i>Turno AM</span><span><i class="k-pm"></i>Turno PM</span><span><i class="k-pt"></i>Part time (&lt; 6 h)</span><span><i class="k-off"></i>Descanso</span><span><i class="k-ret"></i>Retiro / vacaciones</span><span>Barras: personas por día (AM abajo, PM arriba)</span></div>
+  <section class="grid">${cards}</section>
+  ${ui.detail?detailOverlay(w,ui.detail):''}`;
+}
+
+function detailOverlay(w,s){
+  const e=effective(w,s), ps=e.people, cov=coverage(ps.filter(p=>!retired(p)));
+  return `<div class="overlay" data-act="closeDetail"><div class="panel" role="dialog" aria-modal="true" aria-label="${esc(s)}" data-stop="1">
+    <div class="panel-head"><div><span class="eyebrow">S${w} · ${range(w)}</span><h2>${esc(s)}</h2></div>
+      <button class="btn" data-act="closeDetail" id="closeDetailBtn">Cerrar</button></div>
+    <div class="scroll"><table><thead><tr><th>Zubalero</th><th>Restricción</th>${DS.map(d=>`<th>${d}</th>`).join('')}<th>Horas</th></tr></thead>
+    <tbody>${ps.map(p=>`<tr><td class="person"><div class="pn">${esc(p.name)}</div><div class="pm">${esc(p.rol)} · ${esc(p.mod)}</div></td>
+      <td>${p.tipo?`<span class="tag">${esc(p.tipo)}</span>`:'<span class="muted">—</span>'}${p.descanso?`<div class="pm muted" style="font-size:.76rem;margin-top:3px">Descansa ${esc(p.descanso.toLowerCase())}</div>`:''}</td>
+      ${p.days.map(v=>`<td>${chip(v)}</td>`).join('')}<td class="hrs ${hoursOf(p)>MAX_H?'over':''}">${hoursOf(p)} h</td></tr>`).join('')}</tbody>
+    <tfoot><tr><td colspan="2">Cobertura AM / PM / Part</td>${cov.map(c=>`<td class="cov">${c.am}/${c.pm}/${c.pt}</td>`).join('')}<td></td></tr></tfoot></table></div>
+  </div></div>`;
+}
+
+function viewPlan(){
+  const w=ui.planWeek; const rows=STORES.map(s=>({s,e:effective(w,s),dirty:!!drafts[key(w,s)]}));
+  const done=rows.filter(r=>r.e.status==='planificado').length;
+  return `
+  <header class="topbar">
+    <div class="titles"><span class="eyebrow">Planificación</span><h1>Semana a planificar</h1></div>
+    <div class="actions"><button class="btn ghost" data-act="goSummary">← Resumen semana previa</button>
+      <button class="btn" data-act="export" data-week="${w}">Exportar Excel S${w}</button></div>
+  </header>
+  <section class="panel">
+    <div class="panel-head">
+      <div class="weekpick"><div class="field"><label for="planWeek">Semana</label>
+        <select id="planWeek">${PLAN_WEEKS.map(x=>`<option value="${x}" ${x===w?'selected':''}>Semana ${x} · ${range(x)}</option>`).join('')}</select></div>
+        <span class="muted" style="padding-bottom:8px">${w===41?'Sugerencia: hoja S41 del Excel.':`Sugerencia: copia de la S${w-1}.`}</span></div>
+      <div class="progress"><div style="display:flex;justify-content:space-between;font-size:.86rem"><span><b>${done}</b> de ${STORES.length} tiendas planificadas</span><span class="muted">${STORES.length-done} por revisar</span></div>
+        <div class="track"><span style="width:${done/STORES.length*100}%"></span></div></div>
+    </div>
+    <div class="scroll"><table class="storeTable"><thead><tr><th>Tienda</th><th>Personas</th><th class="hide-sm">Horas</th><th>Estado</th><th class="hide-sm">Actualizado</th><th></th></tr></thead>
+    <tbody>${rows.map(r=>{ const ps=(drafts[key(w,r.s)]?.people||r.e.people).filter(p=>!retired(p)); return `<tr class="click" data-act="openStore" data-store="${esc(r.s)}">
+      <td>${esc(r.s)}</td><td class="num">${ps.length}</td><td class="num hide-sm">${ps.reduce((a,p)=>a+hoursOf(p),0)}</td>
+      <td>${pill(r.e.status,r.dirty)}</td><td class="muted hide-sm">${fmtTime(r.e.updatedAt)}</td>
+      <td style="text-align:right"><button class="btn sm" data-act="openStore" data-store="${esc(r.s)}">${r.e.status==='planificado'?'Editar':'Revisar'}</button></td></tr>`; }).join('')}</tbody></table></div>
+    <div class="banner">${storageNote()}</div>
+  </section>`;
+}
+
+function getDraft(){ const k=key(ui.planWeek,ui.store); if(!drafts[k]) return null; return drafts[k]; }
+function ensureDraft(){ const k=key(ui.planWeek,ui.store); if(!drafts[k]) drafts[k]={people:clone(effective(ui.planWeek,ui.store).people)}; return drafts[k]; }
+function workingPeople(){ return getDraft()?.people || effective(ui.planWeek,ui.store).people; }
+
+function cellSelect(p,i){
+  const v=p.days[i]; const opts=[...new Set([...SHIFT_OPTS, ...(isWork(v)||SPECIAL.includes(v)?[]:[v]), ...(isWork(v)?[v]:[])])].sort();
+  const all=[...opts, ...SPECIAL];
+  const man=(p.manual||[]).includes(i), ch=ui.changed.has(p.id+':'+i);
+  return `<div class="cellwrap ${man?'manual':''} ${ch?'changed':''}"><select class="cell k-${kind(v)}" data-f="day" data-pid="${p.id}" data-i="${i}" id="c-${p.id}-${i}" aria-label="${esc(p.name)} ${DAYS[i]}">
+    ${all.map(o=>`<option value="${esc(o)}" ${o===v?'selected':''}>${esc(o)}</option>`).join('')}<option value="__otro">Otro horario…</option></select></div>`;
+}
+
+function viewEditor(){
+  const w=ui.planWeek, s=ui.store, e=effective(w,s), people=workingPeople(), dirty=!!getDraft();
+  const cov=coverage(people.filter(p=>!retired(p)));
+  // día sugerido de descanso para alguien nuevo: el de menos gente programada
+  const quiet=DAYS[cov.map((c,i)=>[c.am+c.pm+c.pt,i]).sort((a,b)=>a[0]-b[0]||a[1]-b[1])[0]?.[1]??0];
+  return `
+  <header class="topbar">
+    <div class="titles"><span class="eyebrow">S${w} · ${range(w)} · ${esc(chainOf(s))}</span><h1>${esc(s)}</h1>
+      <div id="edStatus">${pill(e.status,dirty)}</div></div>
+    <div class="actions"><button class="btn ghost" data-act="backPlan">← Volver al resumen S${w}</button>
+      <button class="btn primary" data-act="update">Actualizar horario</button></div>
+  </header>
+  <section class="panel">
+    <div class="legend"><span><i class="k-am"></i>AM</span><span><i class="k-pm"></i>PM</span><span><i class="k-pt"></i>Part</span><span><i class="k-off"></i>Descanso</span>
+      <span><i style="background:var(--accent);border-radius:50%;width:7px;height:7px"></i>Editado a mano (las reglas no lo tocan)</span></div>
+    <div class="scroll"><table class="ed"><thead><tr><th>Zubalero</th><th>Tipo / restricción</th><th>Día descanso</th>${DS.map(d=>`<th>${d}</th>`).join('')}<th>Horas</th><th></th></tr></thead>
+    <tbody>${people.map(p=>`<tr>
+      <td class="person"><input type="text" class="nm" value="${esc(p.name)}" data-f="name" data-pid="${p.id}" id="n-${p.id}" aria-label="Nombre">
+        <div class="sub"><select data-f="rol" data-pid="${p.id}" id="r-${p.id}" aria-label="Rol">${['Picker','Picker Senior'].map(o=>`<option ${o===p.rol?'selected':''}>${o}</option>`).join('')}</select>
+        <select data-f="mod" data-pid="${p.id}" id="m-${p.id}" aria-label="Modalidad">${['GIG','ZWORK'].map(o=>`<option ${o===p.mod?'selected':''}>${o}</option>`).join('')}</select></div></td>
+      <td><input type="text" class="tipo" list="tipoList" value="${esc(p.tipo)}" placeholder="Sin restricción" data-f="tipo" data-pid="${p.id}" id="t-${p.id}" aria-label="Tipo o restricción"></td>
+      <td><select class="desc" data-f="descanso" data-pid="${p.id}" id="d-${p.id}" aria-label="Día de descanso fijo"><option value="">Libre</option>${DAYS.map(d=>`<option ${d===p.descanso?'selected':''}>${d}</option>`).join('')}</select></td>
+      ${p.days.map((_,i)=>`<td>${cellSelect(p,i)}</td>`).join('')}
+      <td class="hrs ${hoursOf(p)>MAX_H?'over':''}">${hoursOf(p)} h</td>
+      <td>${ui.confirmDel===p.id?`<span class="confirm">¿Quitar? <button class="btn sm danger" data-act="delYes" data-pid="${p.id}">Sí</button><button class="btn sm" data-act="delNo">No</button></span>`
+        :`<button class="btn sm ghost danger" data-act="del" data-pid="${p.id}" aria-label="Quitar a ${esc(p.name)}">Quitar</button>`}</td></tr>`).join('')}</tbody>
+    <tfoot><tr><td colspan="3">Cobertura AM / PM / Part</td>${cov.map(c=>`<td class="cov"><span class="${c.am?'':'zero'}">${c.am}</span>/<span class="${c.pm?'':'zero'}">${c.pm}</span>/${c.pt}</td>`).join('')}<td colspan="2"></td></tr></tfoot></table></div>
+
+    <form class="addrow" id="addForm">
+      <div class="field grow"><label for="addName">Nueva persona</label><input type="text" id="addName" placeholder="Nombre y apellidos" required></div>
+      <div class="field"><label for="addRol">Rol</label><select id="addRol"><option>Picker</option><option>Picker Senior</option></select></div>
+      <div class="field"><label for="addMod">Modalidad</label><select id="addMod"><option>GIG</option><option>ZWORK</option></select></div>
+      <div class="field"><label for="addTipo">Tipo</label><input type="text" id="addTipo" list="tipoList" placeholder="AM, PM…"></div>
+      <div class="field"><label for="addDesc">Descanso</label><select id="addDesc">${DAYS.map(d=>`<option ${d===quiet?'selected':''}>${d}</option>`).join('')}</select></div>
+      <button class="btn" type="submit">+ Agregar persona</button>
+    </form>
+
+    ${ui.notes?`<div class="notes"><h3>${ui.notes.length?'Revisa antes de cerrar la semana':'Horario actualizado sin observaciones'}</h3>${ui.notes.length?`<ul>${ui.notes.map(n=>`<li>${esc(n)}</li>`).join('')}</ul>`:''}</div>`:''}
+
+    <details class="rules"><summary>Qué hace “Actualizar horario”</summary><ul>
+      <li><b>Día descanso</b>: mueve el DESCANSO a ese día y cubre el día libre anterior con el turno habitual de la persona.</li>
+      <li><b>AM / PM</b>: pone todos los días trabajados en su turno AM (p. ej. 08 - 16) o PM (14 - 22).</li>
+      <li><b>Por días</b>: “S-D (AM)”, “V-S-D (AM)”, “L-V (AM) S-D (PM)” aplican el turno solo a esos días (L, M, Mi/X, J, V, S, D).</li>
+      <li><b>Part AM / Part (PM)</b>: 09 - 13 o 18 - 22. <b>Rotativo</b> o vacío: se respeta lo que pongas a mano.</li>
+      <li>Las celdas editadas a mano no se cambian. Luego valida el tope de ${MAX_H} h semanales y que cada día tenga AM y PM, y marca la tienda como <b>Planificado</b>.</li></ul></details>
+    <div class="banner">${storageNote()}</div>
+  </section>`;
+}
+function renderEditorStatus(){ const el=document.getElementById('edStatus'); if(el&&ui.store) el.innerHTML=pill(effective(ui.planWeek,ui.store).status,!!getDraft()); }
+
+/* ---------- eventos ---------- */
+document.addEventListener('click',ev=>{
+  const t=ev.target.closest('[data-act]'); if(!t) return;
+  if(t.dataset.act==='closeDetail' && ev.target.closest('[data-stop]') && t.id!=='closeDetailBtn') return;
+  const a=t.dataset.act;
+  if(a==='detail'){ ui.detail=t.dataset.store; render(); document.getElementById('closeDetailBtn')?.focus(); }
+  else if(a==='closeDetail'){ ui.detail=null; render(); }
+  else if(a==='goPlan'){ ui.view='plan'; ui.detail=null; render(); window.scrollTo(0,0); }
+  else if(a==='goSummary'){ ui.view='summary'; render(); window.scrollTo(0,0); }
+  else if(a==='openStore'){ ev.stopPropagation(); ui.store=t.dataset.store; ui.view='editor'; ui.changed=new Set(); ui.notes=null; ui.confirmDel=null; render(); window.scrollTo(0,0); }
+  else if(a==='backPlan'){ ui.view='plan'; ui.store=null; ui.notes=null; render(); window.scrollTo(0,0); }
+  else if(a==='export'){ exportWeek(+t.dataset.week); }
+  else if(a==='del'){ ui.confirmDel=t.dataset.pid; render(); }
+  else if(a==='delNo'){ ui.confirmDel=null; render(); }
+  else if(a==='delYes'){ const d=ensureDraft(); d.people=d.people.filter(p=>p.id!==t.dataset.pid); ui.confirmDel=null; render(); toast('Persona quitada. Presiona “Actualizar horario” para guardar.'); }
+  else if(a==='update'){ doUpdate(); }
+});
+document.addEventListener('keydown',ev=>{ if(ev.key==='Escape'&&ui.detail){ ui.detail=null; render(); } });
+document.addEventListener('change',ev=>{
+  const el=ev.target;
+  if(el.id==='sumWeek'){ ui.sumWeek=+el.value; render(); return; }
+  if(el.id==='planWeek'){ ui.planWeek=+el.value; render(); return; }
+  const f=el.dataset.f; if(!f) return;
+  const d=ensureDraft(); const p=d.people.find(x=>x.id===el.dataset.pid); if(!p) return;
+  if(f==='day'){ const i=+el.dataset.i; let v=el.value;
+    if(v==='__otro'){ const td=el.closest('td'); td.innerHTML=`<input type="text" class="cell" id="c-${p.id}-${i}" placeholder="07 - 15" aria-label="Horario personalizado">`;
+      const inp=td.querySelector('input'); inp.focus();
+      const commit=()=>{ const nv=norm(inp.value); if(nv && (isWork(nv)||nv.length<=14)){ p.days[i]=nv; if(!p.manual.includes(i)) p.manual.push(i); } render(); };
+      inp.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); inp.blur(); } if(e.key==='Escape'){ inp.value=''; inp.blur(); } });
+      inp.addEventListener('blur',commit,{once:true}); return; }
+    p.days[i]=v; p.manual=p.manual||[]; if(!p.manual.includes(i)) p.manual.push(i); ui.changed.delete(p.id+':'+i); render(); return; }
+  if(f==='name'||f==='tipo'){ p[f]=el.value.trim(); renderEditorStatus(); return; }
+  p[f]=el.value; render();
+});
+document.addEventListener('submit',ev=>{
+  if(ev.target.id!=='addForm') return; ev.preventDefault();
+  const name=document.getElementById('addName').value.trim(); if(!name){ document.getElementById('addName').focus(); return; }
+  const tipo=document.getElementById('addTipo').value.trim(), desc=document.getElementById('addDesc').value;
+  const t=tipo.toUpperCase(); const sh=/PM/.test(t)&&!/AM/.test(t)?'14 - 22':'08 - 16';
+  const p={id:newId(),name,rol:document.getElementById('addRol').value,mod:document.getElementById('addMod').value,tipo,descanso:desc,
+    days:DAYS.map(d=>d===desc?'DESCANSO':sh),manual:[]};
+  ensureDraft().people.push(p); ui.changed=new Set(p.days.map((_,i)=>p.id+':'+i)); render();
+  toast(`${name} agregado. Ajusta sus turnos y presiona “Actualizar horario”.`);
+});
+
+async function doUpdate(){
+  const d=ensureDraft(); const res=applyRules(d.people);
+  ui.changed=res.changed; ui.notes=res.notes;
+  const ok=await persist(ui.planWeek,ui.store,d.people);
+  delete drafts[key(ui.planWeek,ui.store)];
+  render();
+  toast(`${ui.store}: horario de la S${ui.planWeek} actualizado y marcado como Planificado${res.changed.size?` · ${res.changed.size} celdas ajustadas`:''}.`);
+}
+
+/* ---------- exportar ---------- */
+async function exportWeek(w){
+  if(!window.XLSX){ toast('No se pudo cargar el generador de Excel. Recarga la página e inténtalo de nuevo.'); return; }
+  if(!downloads){ toast('La descarga de archivos no está disponible en esta vista. Abre el artifact en claude.ai.'); return; }
+  const head=['SEMANA','TIPO / RESTRICCION','TIENDA','ZUBALERO','ROL','MODALIDAD','Dia descanso',...DAYS,'HORAS','ESTADO'];
+  const rows=[head];
+  STORES.forEach(s=>{ const e=effective(w,s); const st=e.status==='planificado'?'Planificado':e.status==='excel'?'Ejecutado':'Por revisar';
+    e.people.forEach(p=>rows.push([w,p.tipo||'',s,p.name,p.rol,p.mod,p.descanso||'',...p.days,hoursOf(p),st])); });
+  const ws=XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols']=[6,18,30,36,13,11,13,10,10,10,10,10,10,10,7,12].map(wch=>({wch}));
+  ws['!autofilter']={ref:`A1:P${rows.length}`};
+  const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'S'+w);
+  const out=XLSX.write(wb,{bookType:'xlsx',type:'array'});
+  try{ await downloads.save({filename:`Horarios PeYA S${w}.xlsx`, data:new Blob([out])}); toast(`Excel de la S${w} listo: ${rows.length-1} filas, ${STORES.length} tiendas.`); }
+  catch(e){ if(e?.code==='declined') return; toast(e?.code==='rate_limited'?'Ya hay una descarga pendiente de confirmar.':'No se pudo descargar el archivo en esta vista.'); }
+}
+
+render(); boot();
+</script>
