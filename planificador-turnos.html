@@ -227,13 +227,30 @@ function weekPeople(w){ return STORES.flatMap(s=>effective(w,s).people); }
 const LS='peya-turnos-plans';
 function loadLocal(){ try{ plans=JSON.parse(localStorage.getItem(LS)||'{}')||{}; }catch(e){ plans={}; } }
 function saveLocal(){ try{ localStorage.setItem(LS,JSON.stringify(plans)); }catch(e){} }
+// semanas que el administrador agrega a mano (la S40 y S41 vienen del Excel)
+let addedWeeks=[];
+function loadLocalWeeks(){ try{ addedWeeks=JSON.parse(localStorage.getItem(LS+'-weeks')||'[]')||[]; }catch(e){ addedWeeks=[]; } }
+function activeWeeks(){ const s=new Set([40,41,...addedWeeks]); return [...s].filter(w=>w>=40&&w<=54).sort((a,b)=>a-b); }
+function candidateWeeks(){ const a=activeWeeks(); return PLAN_WEEKS.filter(w=>!a.includes(w)); }
+async function addWeek(w){ addedWeeks=[...new Set([...addedWeeks,w])].sort((a,b)=>a-b);
+  try{ localStorage.setItem(LS+'-weeks',JSON.stringify(addedWeeks)); }catch(e){}
+  ui.addingWeek=false; ui.sumWeek=w; ui.planWeek=w; render();
+  toast(`S${w} agregada. Sus horarios parten de la semana anterior y todas las tiendas quedan en “Por revisar”.`);
+  if(db){ try{ await db.doc('config/weeks').set({weeks:addedWeeks, updatedAt:new Date().toISOString()}); }catch(e){ toast('No se pudo guardar la semana en la base compartida. Quedó guardada en este navegador.'); } } }
+function addWeekBar(){ if(!ui.addingWeek) return ''; const c=candidateWeeks(); if(!c.length) return '';
+  const next=c.find(w=>w>Math.max(...activeWeeks()))??c[0];
+  return `<div class="confirmbar" role="group" aria-label="Agregar semana"><span>Elige la semana que vas a planificar. Se crea con una copia de los horarios de la semana anterior.</span>
+    <div class="actions"><select id="newWeek" aria-label="Semana a agregar">${c.map(w=>`<option value="${w}" ${w===next?'selected':''}>S${w} · ${range(w)}</option>`).join('')}</select>
+    <button class="btn primary" data-act="addWeekYes">Agregar semana</button><button class="btn" data-act="addWeekNo">Cancelar</button></div></div>`; }
 async function boot(){
-  loadLocal(); storage='local';
+  loadLocal(); loadLocalWeeks(); storage='local';
   const use=window.claude?.use;
   if(use){
     try{ downloads=await window.claude.use('downloads'); }catch(e){ downloads=null; }
     try{ db=await window.claude.use('db'); }catch(e){ db=null; }
     if(db){
+      db.doc('config/weeks').onSnapshot(snap=>{ if(snap.exists){ const ws=snap.data().weeks; if(Array.isArray(ws)) addedWeeks=ws.filter(Number.isInteger); }
+        if(ui.view!=='editor') render(); }, ()=>{});
       db.collection('plans').limit(1000).onSnapshot(snap=>{
         const next={}; snap.docs.forEach(d=>{ const x=d.data(); if(x&&x.week&&x.store) next[key(x.week,x.store)]=x; });
         plans=next; storage='db'; if(ui.view!=='editor') render(); else renderEditorStatus();
@@ -305,7 +322,7 @@ function render(){ const app=document.getElementById('app');
   else app.innerHTML=viewEditor();
 }
 
-function summaryWeeks(){ return [40,...PLAN_WEEKS]; }
+function summaryWeeks(){ return activeWeeks(); }
 
 function viewSummary(){
   const w=ui.sumWeek, people=weekPeople(w).filter(p=>!retired(p));
@@ -330,6 +347,7 @@ function viewSummary(){
     <div class="actions">
       <div class="field"><label for="sumWeek">Ver semana</label><select id="sumWeek">${summaryWeeks().map(x=>`<option value="${x}" ${x===w?'selected':''}>S${x} · ${range(x)}</option>`).join('')}</select></div>
       <button class="btn" data-act="export" data-week="${w}">Exportar Excel S${w}</button>
+      <button class="btn" data-act="addWeek" ${candidateWeeks().length?'':'disabled'}>+ Agregar semana</button>
       <button class="btn" data-act="askWeek" data-type="reset" ${w===40?'disabled title="La S40 es la base del Excel"':''}>Resetear semana</button>
       <button class="btn danger" data-act="askWeek" data-type="clear" ${w===40?'disabled title="La S40 es la base del Excel"':''}>Eliminar semana</button>
       <button class="btn primary" data-act="goPlan">Planificar nueva semana</button>
@@ -343,7 +361,7 @@ function viewSummary(){
     <div class="stat"><b>${maxDay}</b><span>personas el día pico (${peakDay})</span></div>
   </section>
   <div class="legend"><span><i class="k-am"></i>Turno AM</span><span><i class="k-pm"></i>Turno PM</span><span><i class="k-pt"></i>Part time (&lt; 6 h)</span><span><i class="k-off"></i>Descanso</span><span><i class="k-ret"></i>Retiro / vacaciones</span><span>Barras: personas por día (AM abajo, PM arriba)</span></div>
-  ${weekConfirm(w)}
+  ${addWeekBar()}${weekConfirm(w)}
   ${cards.trim()?`<section class="grid">${cards}</section>`:`<section class="panel"><h3>La S${w} no tiene horarios</h3><p class="muted" style="margin:0">Usa “Resetear semana” para copiar los horarios de la semana anterior, o entra a “Planificar nueva semana” y agrega personas tienda por tienda.</p></section>`}
   ${ui.detail?detailOverlay(w,ui.detail):''}`;
 }
@@ -370,10 +388,12 @@ function viewPlan(){
     <div class="actions"><button class="btn ghost" data-act="goSummary">← Resumen semana previa</button>
       <button class="btn" data-act="export" data-week="${w}">Exportar Excel S${w}</button></div>
   </header>
+  ${addWeekBar()}
   <section class="panel">
     <div class="panel-head">
       <div class="weekpick"><div class="field"><label for="planWeek">Semana</label>
-        <select id="planWeek">${PLAN_WEEKS.map(x=>`<option value="${x}" ${x===w?'selected':''}>Semana ${x} · ${range(x)}</option>`).join('')}</select></div>
+        <select id="planWeek">${activeWeeks().filter(x=>x>=41).map(x=>`<option value="${x}" ${x===w?'selected':''}>Semana ${x} · ${range(x)}</option>`).join('')}</select></div>
+        <button class="btn" data-act="addWeek" ${candidateWeeks().length?'':'disabled'}>+ Agregar semana</button>
         <span class="muted" style="padding-bottom:8px">${w===41?'Sugerencia: hoja S41 del Excel.':`Sugerencia: copia de la S${w-1}.`}</span></div>
       <div class="progress"><div style="display:flex;justify-content:space-between;font-size:.86rem"><span><b>${done}</b> de ${STORES.length} tiendas planificadas</span><span class="muted">${STORES.length-done} por revisar</span></div>
         <div class="track"><span style="width:${done/STORES.length*100}%"></span></div></div>
@@ -461,7 +481,10 @@ document.addEventListener('click',ev=>{
   else if(a==='adjust'){ ui.planWeek=+t.dataset.week; ui.store=t.dataset.store; ui.detail=null; ui.view='editor'; ui.changed=new Set(); ui.notes=null; ui.confirmDel=null; render(); window.scrollTo(0,0); }
   else if(a==='openStore'){ ev.stopPropagation(); ui.store=t.dataset.store; ui.view='editor'; ui.changed=new Set(); ui.notes=null; ui.confirmDel=null; render(); window.scrollTo(0,0); }
   else if(a==='backPlan'){ ui.view='plan'; ui.store=null; ui.notes=null; render(); window.scrollTo(0,0); }
-  else if(a==='askWeek'){ ui.confirmWeek={type:t.dataset.type,w:ui.sumWeek}; render(); document.getElementById('weekYes')?.focus(); }
+  else if(a==='addWeek'){ ui.addingWeek=true; ui.confirmWeek=null; render(); document.getElementById('newWeek')?.focus(); }
+  else if(a==='addWeekNo'){ ui.addingWeek=false; render(); }
+  else if(a==='addWeekYes'){ const v=+document.getElementById('newWeek')?.value; if(v) addWeek(v); }
+  else if(a==='askWeek'){ ui.addingWeek=false; ui.confirmWeek={type:t.dataset.type,w:ui.sumWeek}; render(); document.getElementById('weekYes')?.focus(); }
   else if(a==='weekNo'){ ui.confirmWeek=null; render(); }
   else if(a==='weekYes'){ const c=ui.confirmWeek; ui.confirmWeek=null; if(c) (c.type==='reset'?resetWeek:clearWeek)(c.w); }
   else if(a==='export'){ exportWeek(+t.dataset.week); }
